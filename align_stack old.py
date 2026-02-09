@@ -13,13 +13,14 @@ from scipy.signal import hilbert
 from scipy.signal.windows import gaussian
 
 min_freq, max_freq            = 1.0, 5.0 # Bandpass filter (Hz)
-start_time, end_time          = -1990.0, 3690.0 # Plotting time window (seconds since origin)
+# start_time, end_time          = -1990.0, 3690.0 # Plotting time window (seconds since origin)
+start_time, end_time          = 0.0, 100.0 # Plotting time window (seconds since origin)
 win_pre, win_post             = 0.5,  0.5 # Correlation window parameters (seconds)
 r_window_min                  = 0.7       # Minimum correlation coefficient for trace selection
 move_limit_sec                = 0.05      # Maximum allowed shift (seconds) searched in compute_lag
 
 # Run modes
-all_channels = True  # If True to process all channels
+all_channels = False  # If True to process all channels
 component   = "R"       # Component selection: 'Z', 'R', or 'T'
 align_phase = "S"       # Alignment phase 'P' or 'S'
 
@@ -27,23 +28,31 @@ event       = "CI_40353544" # Single run selection (used when the corresponding 
 events = [event]        # Allows for future modification to process multiple events
 
 # Paths
-info_root = Path("/Users/vidale/Documents/Research/Mingze_SJF/20220930_events_cut/event_sta_info")
-data_path = Path("/Users/vidale/Documents/Research/Mingze_SJF/20220930_events_cut/07_1hour_20220930")
+path_prefix = "/Users/vidale/Documents/Research/Mingze_SJF/"
+info_root = Path(path_prefix + "20220930_events_cut/event_sta_info")
+data_path = Path(path_prefix + "20220930_events_cut/07_1hour_20220930")
 
+show_plots = True  # If True, show plots interactively (only applies to non-three-component mode)
 # plotting / stacking options
-stack_all_traces_for_final  = True  # Final stack mode: True = use ALL traces after final lag3; False = use only selected traces
-show_diff_rt_plot           = True  # Show R T differences in the combined plot
-show_rt_filter_compare_plot = True  # Compare stacks with/without correlation screening
-save_rt_filter_station_list = True  # Save / reuse correlation screening result
-show_est_calc_shift_plot    = True  # Compare estimated shifts vs theoretical (calculated) shifts
-show_individual_seismograms = False  # Plot individual seismograms (20 traces per subplot, 5 panels per figure)
-show_snippet_compare_plot   = True  # Plot correlation-window snippet comparison (pass vs fail)
-show_stack_stage_plot       = True  # Plot overlay of Stage1/Stage2/Final stacks
-show_aligned_phase_plot     = False  # Show aligned phase record-section + stack plot
+# not sure
+show_est_calc_shift_plot    = True  # Compare estimated shifts vs theoretical (calculated) shifts (does nothing)
+show_stack_stage_plot       = True  # Plot overlay of Stage1/Stage2/Final stacks (makes png but does not show)
+show_record_section_plot    = True  # Show single-component record-section + stack plot (makes png but does not show)
+# both single-component and three-component modes use these options
+show_individual_seismograms = True  # Plot individual seismograms (20 traces/plot, 5 panels/figure) (does nothing)
+# 3-component mode options
+show_three_comp_plot        = True  # Show 3-component record-section + stack plot FALSE kills showing all plots (makes png but does not show)
+show_three_comp_env_plot    = True  # Show 3-component log10 envelope plot (does nothing)
+show_station_map_3comp_plot = True  # Show 3-component station pass/fail map (does nothing)
+# 1-component mode options
+show_station_map_plot       = True  # Show single-component station pass/fail map (does nothing)
+show_aligned_phase_plot     = True  # Show aligned phase record-section + stack plot (does nothing)
 
-# When running Z-only mode (all_channels=False & component='Z'), read the saved station list and
-# build a filtered stack + compare against the unfiltered stack.
-use_saved_rt_filter_for_z_stack = True
+stack_all_traces_for_final  = True  # Final stack mode: True = use ALL traces after final lag3; False = use only selected traces (does nothing)
+show_diff_rt_plot           = True  # Show R T differences in the combined plot (does nothing)
+show_rt_filter_compare_plot = True  # Compare stacks with/without correlation screening (does nothing)
+show_snippet_compare_plot   = True  # Plot correlation-window snippet comparison (pass vs fail) (does nothing)
+show_single_env_plot        = True  # Show single-component log10 envelope plot (does nothing)
 
 # Travel-time model
 model = TauPyModel(model="iasp91")
@@ -94,6 +103,14 @@ def shift_left_zeropad(x: np.ndarray, n: int) -> np.ndarray:
     y[n:] = x[:-n]
     return y
 
+
+def set_figure_title(fig, title: str) -> None:
+    """Set a descriptive window title if the backend supports it."""
+    try:
+        fig.canvas.manager.set_window_title(title)
+    except Exception:
+        pass
+
 # ===================== Channel / component selection =====================
 # User-facing components: Z, R, T
 if all_channels:
@@ -133,6 +150,10 @@ for idx, channel in enumerate(channels):
         event_depth = float(row["depth"])
         eve_lat, eve_lon = float(row["latitude"]), float(row["longitude"])
         origin = UTCDateTime(str(row["origin_time"]))
+
+        save_path = Path(path_prefix + "output")
+        save_dir = save_path / eve_id
+        save_dir.mkdir(parents=True, exist_ok=True)
 
         # ---- Read station list ----
         station_file = info_root / "stations.txt"
@@ -542,6 +563,7 @@ for idx, channel in enumerate(channels):
         # ---- Plot: superposition of Stage1/Stage2/Final stacks ----
         if show_stack_stage_plot:
             fig_stk, ax_stk = plt.subplots(1, 1, figsize=(10, 3.8))
+            set_figure_title(fig_stk, f"{eve_id} {plot_comp} stage stacks")
             ax_stk.plot(t_abs[mask], aligned_stack[mask], color='C0', lw=2, label='Stage 1: aligned_stack')
             ax_stk.plot(t_abs[mask], selected_aligned_stack[mask], color='C1', lw=2, label='Stage 2: selected_aligned_stack')
             ax_stk.plot(t_abs[mask], stack_vec[mask], color='C3', lw=2.2, label='Final stack')
@@ -554,124 +576,134 @@ for idx, channel in enumerate(channels):
             ax_stk.set_title(f"Event {eve_id} {plot_comp}: Stage-1/Stage-2/Final stacks")
             ax_stk.legend(loc='upper right', fontsize=9)
             plt.tight_layout()
+            stack_file = save_dir / f"{eve_id}_{plot_comp}_stage_stacks_{align_phase}.png"
+            fig_stk.savefig(stack_file, dpi=300, bbox_inches='tight')
+            print(f"✓ Stage stacks plot saved to: {stack_file}")
 
         # ---- Plot: record section (top) + stack (bottom) ----
-        fig, (ax, ax2) = plt.subplots(
-            2,
-            1,
-            figsize=(10, 9),
-            sharex=False,
-            gridspec_kw={"height_ratios": [3, 1]},
-        )
+        record_fig = None
+        if show_record_section_plot:
+            fig, (ax, ax2) = plt.subplots(
+                2,
+                1,
+                figsize=(10, 9),
+                sharex=False,
+                gridspec_kw={"height_ratios": [3, 1]},
+            )
+            record_fig = fig
+            set_figure_title(fig, f"{eve_id} {plot_comp} aligned record section")
 
-        all_rows = selected_rows + rejected_rows
-        all_rows.sort(key=lambda t: t[0])
+            all_rows = selected_rows + rejected_rows
+            all_rows.sort(key=lambda t: t[0])
 
-        t_masked = t_abs[mask]
-        if len(all_rows) > 0 and np.any(mask):
-            A = np.vstack([row[2][mask] for row in all_rows])
-            dvec = np.array([row[0] for row in all_rows], dtype=float)
+            t_masked = t_abs[mask]
+            if len(all_rows) > 0 and np.any(mask):
+                A = np.vstack([row[2][mask] for row in all_rows])
+                dvec = np.array([row[0] for row in all_rows], dtype=float)
 
-            # y-edges for irregular station spacing
-            if len(dvec) == 1:
-                y_edges = np.array([dvec[0] - 0.5, dvec[0] + 0.5])
-            else:
-                mids = 0.5 * (dvec[1:] + dvec[:-1])
-                y_edges = np.empty(len(dvec) + 1)
-                y_edges[1:-1] = mids
-                y_edges[0] = dvec[0] - (mids[0] - dvec[0])
-                y_edges[-1] = dvec[-1] + (dvec[-1] - mids[-1])
+                # y-edges for irregular station spacing
+                if len(dvec) == 1:
+                    y_edges = np.array([dvec[0] - 0.5, dvec[0] + 0.5])
+                else:
+                    mids = 0.5 * (dvec[1:] + dvec[:-1])
+                    y_edges = np.empty(len(dvec) + 1)
+                    y_edges[1:-1] = mids
+                    y_edges[0] = dvec[0] - (mids[0] - dvec[0])
+                    y_edges[-1] = dvec[-1] + (dvec[-1] - mids[-1])
 
-            # t-edges for pcolormesh
-            if len(t_masked) == 1:
-                t_edges = np.array(
-                    [t_masked[0] - 0.5 / sample_rate, t_masked[0] + 0.5 / sample_rate]
+                # t-edges for pcolormesh
+                if len(t_masked) == 1:
+                    t_edges = np.array(
+                        [t_masked[0] - 0.5 / sample_rate, t_masked[0] + 0.5 / sample_rate]
+                    )
+                else:
+                    tmids = 0.5 * (t_masked[1:] + t_masked[:-1])
+                    t_edges = np.empty(len(t_masked) + 1)
+                    t_edges[1:-1] = tmids
+                    t_edges[0] = t_masked[0] - (tmids[0] - t_masked[0])
+                    t_edges[-1] = t_masked[-1] + (t_masked[-1] - tmids[-1])
+
+                ax.pcolormesh(
+                    t_edges,
+                    y_edges,
+                    A,
+                    cmap="gray",
+                    shading="auto",
+                    vmin=-1.0,
+                    vmax=1.0,
                 )
-            else:
-                tmids = 0.5 * (t_masked[1:] + t_masked[:-1])
-                t_edges = np.empty(len(t_masked) + 1)
-                t_edges[1:-1] = tmids
-                t_edges[0] = t_masked[0] - (tmids[0] - t_masked[0])
-                t_edges[-1] = t_masked[-1] + (t_masked[-1] - tmids[-1])
 
-            ax.pcolormesh(
-                t_edges,
-                y_edges,
-                A,
-                cmap="gray",
-                shading="auto",
-                vmin=-1.0,
-                vmax=1.0,
-            )
+            ax.set_xlim(start_time, end_time)
+            ax.set_xlabel("Time since origin (s)")
+            ax.set_ylabel("Epicentral distance (km)")
+            ax.set_title(f"Aligned {align_phase} waveforms Event {eve_id} comp = {plot_comp}")
+            ax.grid(alpha=0.2)
 
-        ax.set_xlim(start_time, end_time)
-        ax.set_xlabel("Time since origin (s)")
-        ax.set_ylabel("Epicentral distance (km)")
-        ax.set_title(f"Aligned {align_phase} waveforms Event {eve_id} comp = {plot_comp}")
-        ax.grid(alpha=0.2)
+            # Theoretical arrival time (nearest station) as a vertical reference line
+            try:
+                if t_ref is not None:
+                    for axi in (ax, ax2):
+                        axi.axvline(x=t_ref, color="k", lw=3, alpha=0.5, zorder=6)
+            except Exception as e:
+                print(f"    [WARN] Failed to draw vertical reference arrival for {align_phase}: {e}")
 
-        # Theoretical arrival time (nearest station) as a vertical reference line
-        try:
-            if t_ref is not None:
+            # Cross-correlation window bounds as vertical yellow lines
+            try:
+                t_win_start = start_time + (win_start / sample_rate)
+                t_win_end = start_time + (win_end / sample_rate)
                 for axi in (ax, ax2):
-                    axi.axvline(x=t_ref, color="k", lw=3, alpha=0.5, zorder=6)
-        except Exception as e:
-            print(f"    [WARN] Failed to draw vertical reference arrival for {align_phase}: {e}")
+                    axi.axvline(x=t_win_start, color="y", lw=2, alpha=0.9, zorder=7)
+                    axi.axvline(x=t_win_end, color="y", lw=2, alpha=0.9, zorder=7)
+            except Exception as e:
+                print(f"    [WARN] Failed to draw correlation window bounds: {e}")
 
-        # Cross-correlation window bounds as vertical yellow lines
-        try:
-            t_win_start = start_time + (win_start / sample_rate)
-            t_win_end = start_time + (win_end / sample_rate)
-            for axi in (ax, ax2):
-                axi.axvline(x=t_win_start, color="y", lw=2, alpha=0.9, zorder=7)
-                axi.axvline(x=t_win_end, color="y", lw=2, alpha=0.9, zorder=7)
-        except Exception as e:
-            print(f"    [WARN] Failed to draw correlation window bounds: {e}")
+            # Cross-correlation search limits (green): yellow window expanded by move_limit_sec
+            try:
+                t_explore_start = t_win_start - move_limit_sec
+                t_explore_end = t_win_end + move_limit_sec
+                t_explore_start = max(start_time, t_explore_start)
+                t_explore_end = min(start_time + (npts / sample_rate), t_explore_end)
+                for axi in (ax, ax2):
+                    axi.axvline(x=t_explore_start, color="g", lw=2, alpha=0.9, zorder=7)
+                    axi.axvline(x=t_explore_end, color="g", lw=2, alpha=0.9, zorder=7)
+            except Exception as e:
+                print(f"    [WARN] Failed to draw correlation search limits: {e}")
 
-        # Cross-correlation search limits (green): yellow window expanded by move_limit_sec
-        try:
-            t_explore_start = t_win_start - move_limit_sec
-            t_explore_end = t_win_end + move_limit_sec
-            t_explore_start = max(start_time, t_explore_start)
-            t_explore_end = min(start_time + (npts / sample_rate), t_explore_end)
-            for axi in (ax, ax2):
-                axi.axvline(x=t_explore_start, color="g", lw=2, alpha=0.9, zorder=7)
-                axi.axvline(x=t_explore_end, color="g", lw=2, alpha=0.9, zorder=7)
-        except Exception as e:
-            print(f"    [WARN] Failed to draw correlation search limits: {e}")
+            # Legend for window bounds
+            try:
+                legend_handles = [
+                    Line2D([0], [0], color='y', lw=2, label='Correlation window'),
+                    Line2D([0], [0], color='g', lw=2, label='Correlation search (±move_limit_sec)'),
+                    Line2D([0], [0], color='none', label=f'Pass r_win: {n_pass_window}'),
+                ]
+                ax.legend(
+                    handles=legend_handles,
+                    loc='upper left',
+                    bbox_to_anchor=(1.02, 1.0),
+                    borderaxespad=0.0,
+                    fontsize=9,
+                )
+            except Exception as e:
+                print(f"    [WARN] Failed to add legend: {e}")
 
-        # Legend for window bounds
-        try:
-            legend_handles = [
-                Line2D([0], [0], color='y', lw=2, label='Correlation window'),
-                Line2D([0], [0], color='g', lw=2, label='Correlation search (±move_limit_sec)'),
-                Line2D([0], [0], color='none', label=f'Pass r_win: {n_pass_window}'),
-            ]
-            ax.legend(
-                handles=legend_handles,
-                loc='upper left',
-                bbox_to_anchor=(1.02, 1.0),
-                borderaxespad=0.0,
-                fontsize=9,
+            # Bottom panel: normalized stack
+            ax2.plot(t_abs[mask], stack_vec[mask], color="C3", lw=1.5)
+            ax2.axhline(0.0, color="k", lw=0.6)
+            ax2.set_xlim(start_time, end_time)
+            ax2.set_xlabel("Time since origin (s)")
+            ax2.set_ylabel("Stack (norm.)")
+            ax2.set_ylim(-1.1, 1.1)
+            ax2.set_title(
+                "Final stack uses ALL traces (no screening)"
+                if stack_all_traces_for_final
+                else "Final stack uses SELECTED traces only"
             )
-        except Exception as e:
-            print(f"    [WARN] Failed to add legend: {e}")
+            ax2.grid(alpha=0.2)
 
-        # Bottom panel: normalized stack
-        ax2.plot(t_abs[mask], stack_vec[mask], color="C3", lw=1.5)
-        ax2.axhline(0.0, color="k", lw=0.6)
-        ax2.set_xlim(start_time, end_time)
-        ax2.set_xlabel("Time since origin (s)")
-        ax2.set_ylabel("Stack (norm.)")
-        ax2.set_ylim(-1.1, 1.1)
-        ax2.set_title(
-            "Final stack uses ALL traces (no screening)"
-            if stack_all_traces_for_final
-            else "Final stack uses SELECTED traces only"
-        )
-        ax2.grid(alpha=0.2)
-
-        plt.tight_layout()
+            plt.tight_layout()
+            record_file = save_dir / f"{eve_id}_{plot_comp}_{align_phase}.png"
+            record_fig.savefig(record_file, dpi=300, bbox_inches="tight")
+            print(f"✓ Record-section plot saved to: {record_file}")
 
         # Store data for three-component plotting or show individual plot
         if process_as_three_comp:
@@ -687,7 +719,7 @@ for idx, channel in enumerate(channels):
             
             # Store data
             all_component_data[comp_key] = {
-                'fig': fig,
+                'fig': record_fig,
                 'all_rows': [(r[0], r[1], r[2].copy()) for r in (selected_rows + rejected_rows)],
                 'stack_vec': stack_vec.copy(),
                 't_abs': t_abs.copy(),
@@ -720,57 +752,72 @@ for idx, channel in enumerate(channels):
             # Store t_ref
             all_component_data[comp_key]['t_ref'] = t_ref
             
-            plt.close(fig)  # Close individual figure
+            if (not show_plots) and record_fig is not None:
+                plt.close(record_fig)  # Close individual figure
         else:
             # Show individual plot in non-three-component mode
             # Save figure (same location/pattern as the original script)
-            save_path = Path(
-                "/Users/vidale/Documents/Research/Mingze_SJF/output"
-            )
-            save_dir = save_path / eve_id
-            #save_dir.mkdir(parents=True, exist_ok=True)
             save_file = save_dir / f"{eve_id}_{plot_comp}_{align_phase}.png"
-            #plt.savefig(save_file, dpi=300, bbox_inches="tight")
+            if show_record_section_plot and record_fig is not None:
+                record_fig.savefig(save_file, dpi=300, bbox_inches="tight")
 
-            # ===================== Z-only: stack compare using saved R–T screening list =====================
-            if (component == 'Z') and show_rt_filter_compare_plot and use_saved_rt_filter_for_z_stack:
-                rt_txt = save_dir / f"{eve_id}_rt_zero_diff_stations_S.txt"
-                if not rt_txt.exists():
-                    print(f"[WARN] Saved R–T station list not found: {rt_txt} (run all_channels=True first)")
-                else:
-                    try:
-                        with open(rt_txt, 'r') as f:
-                            keep_sta = [line.strip() for line in f if line.strip() and (not line.startswith('#'))]
-                        keep_sta = [s for s in keep_sta if s in aligned_traces_by_station]
+            # ===================== Log10 envelope plot (single trace) =====================
+            if show_single_env_plot and num_traces == 1:
+                try:
+                    env = np.abs(hilbert(stack_vec))
+                    std_sec = 1.0
+                    std_samples = max(1.0, float(sample_rate) * std_sec)
+                    win_samples = max(3, int(round(6.0 * std_samples)))
+                    gauss = gaussian(win_samples, std_samples)
+                    gauss = gauss / np.sum(gauss)
+                    env_smooth = np.convolve(env, gauss, mode='same')
+                    log_env = np.log10(np.maximum(env_smooth, 1e-12))
 
-                        if len(keep_sta) == 0:
-                            print("[WARN] R–T station list loaded but none found in this Z run for stacking.")
-                        else:
-                            bank_z = [aligned_traces_by_station[s] for s in keep_sta]
-                            stack_z_filt = np.mean(np.vstack(bank_z), axis=0)
-                            ms = np.max(np.abs(stack_z_filt)) or 1.0
-                            stack_z_filt = stack_z_filt / ms
+                    fig_env, ax_env = plt.subplots(figsize=(12, 4.5))
+                    set_figure_title(fig_env, f"{eve_id} {plot_comp} log10 envelope")
+                    ax_env.plot(t_abs[mask], log_env[mask], color='k', lw=1.5)
+                    ax_env.set_xlim(start_time, end_time)
+                    ax_env.set_xlabel('Time since origin (s)', fontsize=11)
+                    ax_env.set_ylabel('log10 envelope', fontsize=11)
+                    ax_env.set_title(
+                        f'Event {eve_id} - log10 envelope ({plot_comp})',
+                        fontsize=12,
+                        fontweight='bold',
+                    )
+                    ax_env.grid(alpha=0.2)
+                    fig_env.subplots_adjust(bottom=0.28)
 
-                            fig_zcmp, ax_zcmp = plt.subplots(1, 1, figsize=(10, 3.8))
-                            ax_zcmp.plot(t_abs[mask], stack_vec[mask], color='k', lw=2, label='No R–T screening')
-                            ax_zcmp.plot(t_abs[mask], stack_z_filt[mask], color='r', lw=2, label='With R–T screening (saved list)')
-                            ax_zcmp.axhline(0.0, color='k', lw=0.6, alpha=0.6)
-                            ax_zcmp.set_xlim(start_time, end_time)
-                            ax_zcmp.set_ylim(-1.1, 1.1)
-                            ax_zcmp.grid(alpha=0.2)
-                            ax_zcmp.set_xlabel('Time since origin (s)')
-                            ax_zcmp.set_ylabel('Stack (norm.)')
-                            ax_zcmp.set_title(f"Event {eve_id} Z-stack compare | N_keep={len(keep_sta)}")
-                            ax_zcmp.legend(loc='upper right', fontsize=9)
-                            plt.tight_layout()
+                    if origin is not None:
+                        try:
+                            origin_dt_utc = origin.datetime
+                            if origin_dt_utc.tzinfo is None:
+                                origin_dt_utc = origin_dt_utc.replace(tzinfo=timezone.utc)
+                            ax_time = ax_env.twiny()
+                            ax_time.set_xlim(ax_env.get_xlim())
+                            ax_time.xaxis.set_label_position('bottom')
+                            ax_time.xaxis.set_ticks_position('bottom')
+                            ax_time.spines['bottom'].set_position(('outward', 36))
+                            ax_time.spines['top'].set_visible(False)
 
-                            zcmp_file = save_dir / f"{eve_id}_Zstack_compare_savedRT_{align_phase}.png"
-                            #plt.savefig(zcmp_file, dpi=300, bbox_inches='tight')
-                            print(f"✓ Z-only stack comparison plot saved to: {zcmp_file}")
-                            # plt.show()  # defer until end
-                    except Exception as e:
-                        print(f"[WARN] Failed to load/apply saved R–T station list for Z-only stacking: {e}")
+                            ticks = ax_env.get_xticks()
+                            labels = [
+                                (origin_dt_utc + timedelta(seconds=float(t))).astimezone(timezone.utc).strftime('%H:%M:%S')
+                                for t in ticks
+                            ]
+                            ax_time.set_xticks(ticks)
+                            ax_time.set_xticklabels(labels)
+                            date_str = origin_dt_utc.date().isoformat()
+                            ax_time.set_xlabel(f'UTC time ({date_str})', fontsize=10)
+                        except Exception as e:
+                            print(f"[WARN] Failed to add UTC time axis (single envelope): {e}")
 
+                    env_file = save_dir / f"{eve_id}_{plot_comp}_log10_envelope_{align_phase}.png"
+                    fig_env.savefig(env_file, dpi=300, bbox_inches='tight')
+                    print(f"✓ Log10 envelope plot saved to: {env_file}")
+                except Exception as e:
+                    print(f"[WARN] Failed to create log10 envelope plot (single trace): {e}")
+
+            # No Z-only R–T screening reuse.
             # ===================== Estimated vs calculated shift plot (single component) =====================
             if show_est_calc_shift_plot:
                 common_sta = set(calc_shifts.keys()) & set(station_shifts.keys())
@@ -782,6 +829,7 @@ for idx, channel in enumerate(channels):
                     calc_shift = np.array([calc_shifts[s] for s in stations], dtype=float)
 
                     fig_ec, ax_ec = plt.subplots(1, 1, figsize=(6.2, 5.2))
+                    set_figure_title(fig_ec, f"{eve_id} {plot_comp} est vs calc shifts")
                     ax_ec.scatter(calc_shift, est_shift, s=20, alpha=0.6)
 
                     minv = float(min(np.min(calc_shift), np.min(est_shift)))
@@ -796,7 +844,7 @@ for idx, channel in enumerate(channels):
                     plt.tight_layout()
 
                     estcalc_file = save_dir / f"{eve_id}_{plot_comp}_est_vs_calc_shift_{align_phase}.png"
-                    #plt.savefig(estcalc_file, dpi=300, bbox_inches='tight')
+                    fig_ec.savefig(estcalc_file, dpi=300, bbox_inches='tight')
                     print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
 
             # ===================== Snippet comparison plot (pass vs fail) =====================
@@ -815,6 +863,7 @@ for idx, channel in enumerate(channels):
                     fail_show = fail_list[:n_show]
 
                     fig_snip, (axp, axf) = plt.subplots(1, 2, figsize=(10, 3.8), sharey=True)
+                    set_figure_title(fig_snip, f"{eve_id} {plot_comp} correlation snippets")
 
                     for sid in pass_show:
                         axp.plot(t_win, snippet_by_station[sid], color='k', alpha=0.4, lw=1)
@@ -840,7 +889,7 @@ for idx, channel in enumerate(channels):
                     plt.tight_layout()
 
                     snip_file = save_dir / f"{eve_id}_{plot_comp}_snippet_compare_{align_phase}.png"
-                    #plt.savefig(snip_file, dpi=300, bbox_inches='tight')
+                    fig_snip.savefig(snip_file, dpi=300, bbox_inches='tight')
                     print(f"✓ Snippet comparison plot saved to: {snip_file}")
                 except Exception as e:
                     print(f"[WARN] Failed to create snippet comparison plot: {e}")
@@ -869,6 +918,10 @@ for idx, channel in enumerate(channels):
                                 figsize=(10, 2.2 * panels_in_fig),
                                 sharex=True,
                                 sharey=False,
+                            )
+                            set_figure_title(
+                                fig_ind,
+                                f"{eve_id} {plot_comp} individual seismograms fig {fig_idx + 1}",
                             )
                             if panels_in_fig == 1:
                                 axes_ind = [axes_ind]
@@ -933,62 +986,65 @@ for idx, channel in enumerate(channels):
                             ind_file = save_dir / (
                                 f"{eve_id}_{plot_comp}_individual_seismograms_{align_phase}_fig{fig_idx + 1}.png"
                             )
-                            #plt.savefig(ind_file, dpi=300, bbox_inches='tight')
+                            fig_ind.savefig(ind_file, dpi=300, bbox_inches='tight')
                             print(f"✓ Individual seismograms plot saved to: {ind_file}")
                 except Exception as e:
                     print(f"[WARN] Failed to create individual seismograms plot: {e}")
 
             # ===================== Station maps: pass each threshold and both =====================
-            try:
-                tr_map = aligned_traces_by_station
-                all_stations = sorted(tr_map.keys(), key=lambda s: int(s))
-                pass_win = set(pass_window_ids)
+            if show_station_map_plot:
+                try:
+                    tr_map = aligned_traces_by_station
+                    all_stations = sorted(tr_map.keys(), key=lambda s: int(s))
+                    pass_win = set(pass_window_ids)
 
-                fig_map, axm = plt.subplots(1, 1, figsize=(6.5, 5.5))
-                pass_lats = [name2ll[s][0] for s in all_stations if s in pass_win]
-                pass_lons = [name2ll[s][1] for s in all_stations if s in pass_win]
-                fail_lats = [name2ll[s][0] for s in all_stations if s not in pass_win]
-                fail_lons = [name2ll[s][1] for s in all_stations if s not in pass_win]
+                    fig_map, axm = plt.subplots(1, 1, figsize=(6.5, 5.5))
+                    set_figure_title(fig_map, f"{eve_id} {plot_comp} station pass map")
+                    pass_lats = [name2ll[s][0] for s in all_stations if s in pass_win]
+                    pass_lons = [name2ll[s][1] for s in all_stations if s in pass_win]
+                    fail_lats = [name2ll[s][0] for s in all_stations if s not in pass_win]
+                    fail_lons = [name2ll[s][1] for s in all_stations if s not in pass_win]
 
-                if len(fail_lons) > 0:
-                    axm.scatter(fail_lons, fail_lats, s=18, c='0.7', label='Fail')
-                if len(pass_lons) > 0:
-                    axm.scatter(pass_lons, pass_lats, s=22, c='C3', label='Pass')
+                    if len(fail_lons) > 0:
+                        axm.scatter(fail_lons, fail_lats, s=18, c='0.7', label='Fail')
+                    if len(pass_lons) > 0:
+                        axm.scatter(pass_lons, pass_lats, s=22, c='C3', label='Pass')
 
-                axm.set_title('Pass r_win', fontsize=11, fontweight='bold')
-                axm.grid(alpha=0.3)
-                axm.set_xlabel('Longitude')
-                axm.set_ylabel('Latitude')
-                axm.legend(loc='upper right', fontsize=9)
+                    axm.set_title('Pass r_win', fontsize=11, fontweight='bold')
+                    axm.grid(alpha=0.3)
+                    axm.set_xlabel('Longitude')
+                    axm.set_ylabel('Latitude')
+                    axm.legend(loc='upper right', fontsize=9)
 
-                fig_map.suptitle(
-                    f"Event {eve_id} {plot_comp}: stations passing thresholds",
-                    fontsize=13,
-                    fontweight='bold',
-                )
-                plt.tight_layout()
+                    fig_map.suptitle(
+                        f"Event {eve_id} {plot_comp}: stations passing thresholds",
+                        fontsize=13,
+                        fontweight='bold',
+                    )
+                    plt.tight_layout()
 
-                map_file = save_dir / f"{eve_id}_{plot_comp}_station_pass_map_{align_phase}.png"
-                #plt.savefig(map_file, dpi=300, bbox_inches='tight')
-                print(f"✓ Station pass/fail map saved to: {map_file}")
-            except Exception as e:
-                print(f"[WARN] Failed to create station pass/fail maps: {e}")
+                    map_file = save_dir / f"{eve_id}_{plot_comp}_station_pass_map_{align_phase}.png"
+                    fig_map.savefig(map_file, dpi=300, bbox_inches='tight')
+                    print(f"✓ Station pass/fail map saved to: {map_file}")
+                except Exception as e:
+                    print(f"[WARN] Failed to create station pass/fail maps: {e}")
 
             # Show figures for single-component mode
-            if show_aligned_phase_plot:
+            if show_plots:
                 plt.show()
-            else:
-                plt.close(fig)
+            elif record_fig is not None:
+                plt.close(record_fig)
 
 
 
 # ===================== Three-component combined plotting =====================
-if process_as_three_comp and len(all_component_data) == 3:
+if show_three_comp_plot and process_as_three_comp and len(all_component_data) == 3:
     print(f"\\n{'='*70}")
     print(f"Creating combined three-component plot...")
     print(f"{'='*70}\\n")
     
     fig = plt.figure(figsize=(18, 9))
+    set_figure_title(fig, f"{eve_id} {align_phase} 3-comp record section")
     gs = fig.add_gridspec(2, 3, height_ratios=[3, 1], hspace=0.3, wspace=0.25)
     
     comp_order = ['DPZ', 'R', 'T']
@@ -1147,18 +1203,18 @@ if process_as_three_comp and len(all_component_data) == 3:
                 fontsize=14, fontweight='bold')
     
     # Save combined figure
-    save_path = Path("/Users/vidale/Documents/Research/Mingze_SJF/output")
+    save_path = Path(path_prefix + "output")
     save_dir = save_path / eve_id
     save_dir.mkdir(parents=True, exist_ok=True)
     save_file = save_dir / f"{eve_id}_3comp_{align_phase}.png"
-    #plt.savefig(save_file, dpi=300, bbox_inches='tight')
+    fig.savefig(save_file, dpi=300, bbox_inches='tight')
     print(f"\n✓ Three-component plot saved to: {save_file}")
     print(f"\n✓ Three-component plot created successfully!\n")    
     # plt.show()  # defer until end
 
     # ===================== Log10 envelope of 3-component stack =====================
     try:
-        if all(comp in stack_by_comp for comp in comp_order):
+        if show_three_comp_env_plot and all(comp in stack_by_comp for comp in comp_order):
             z = stack_by_comp['DPZ']
             r = stack_by_comp['R']
             t = stack_by_comp['T']
@@ -1175,6 +1231,7 @@ if process_as_three_comp and len(all_component_data) == 3:
             log_env = np.log10(np.maximum(env_rms_smooth, 1e-12))
 
             fig_env, ax_env = plt.subplots(figsize=(12, 4.5))
+            set_figure_title(fig_env, f"{eve_id} 3-comp log10 envelope")
             ax_env.plot(t_abs[mask], log_env[mask], color='k', lw=1.5)
             ax_env.set_xlim(start_time, end_time)
             ax_env.set_xlabel('Time since origin (s)', fontsize=11)
@@ -1212,46 +1269,19 @@ if process_as_three_comp and len(all_component_data) == 3:
                     print(f"[WARN] Failed to add UTC time axis (envelope): {e}")
 
             env_file = save_dir / f"{eve_id}_3comp_log10_envelope_{align_phase}.png"
-            #plt.savefig(env_file, dpi=300, bbox_inches='tight')
+            fig_env.savefig(env_file, dpi=300, bbox_inches='tight')
             print(f"✓ Log10 envelope plot saved to: {env_file}")
     except Exception as e:
         print(f"[WARN] Failed to create log10 envelope plot: {e}")
 
-    # ===================== Save R–T zero-diff station list (for reuse in Z-only mode) =====================
-    zero_rt_diff_stations_saved = None
-    if save_rt_filter_station_list and ('R' in all_component_data) and ('T' in all_component_data):
-        r_shifts = all_component_data['R']['station_shifts']
-        t_shifts = all_component_data['T']['station_shifts']
-        common = set(r_shifts.keys()) & set(t_shifts.keys())
-
-        zero_rt_diff_stations_saved = {
-            sta for sta in common
-            if np.isclose(
-                float(r_shifts[sta]['lag_seconds']) - float(t_shifts[sta]['lag_seconds']),
-                0.0,
-                atol=1e-12,
-            )
-        }
-
-        rt_txt = save_dir / f"{eve_id}_rt_zero_diff_stations_{align_phase}.txt"
-        try:
-            with open(rt_txt, 'w') as f:
-                f.write(f"# Event: {eve_id}\n")
-                f.write(f"# align_phase: {align_phase}\n")
-                f.write(f"# criterion: (R lag_seconds - T lag_seconds) == 0\n")
-                f.write(f"# N_zero: {0 if zero_rt_diff_stations_saved is None else len(zero_rt_diff_stations_saved)}\n")
-                for sta in sorted(zero_rt_diff_stations_saved, key=lambda s: int(s)):
-                    f.write(f"{sta}\n")
-            print(f"✓ Saved R–T zero-diff station list to: {rt_txt}")
-        except Exception as e:
-            print(f"[WARN] Failed to write R–T station list: {e}")
-
+    # No R–T zero-diff station list saved.
     # ===================== Stack compare plot: all aligned vs r_min-selected =====================
     if show_rt_filter_compare_plot:
         print("Creating stack comparison plot (all aligned vs r_min-selected)...")
 
         # Figure layout: 3 rows, 1 column (Z / R / T) — vertical arrangement
         fig_cmp, axes_cmp = plt.subplots(3, 1, figsize=(9, 12), sharex=True, sharey=True)
+        set_figure_title(fig_cmp, f"{eve_id} stack compare")
         comp_order = ['DPZ', 'R', 'T']
         comp_titles_cmp = ['Z stack', 'R stack', 'T stack']
         utc_tz = timezone.utc
@@ -1351,7 +1381,7 @@ if process_as_three_comp and len(all_component_data) == 3:
 
         # Save comparison figure
         cmp_file = save_dir / f"{eve_id}_rtfilter_stack_compare_{align_phase}.png"
-        #plt.savefig(cmp_file, dpi=300, bbox_inches='tight')
+        fig_cmp.savefig(cmp_file, dpi=300, bbox_inches='tight')
         print(f"✓ Stack comparison plot saved to: {cmp_file}")
         # plt.show()
 
@@ -1393,6 +1423,10 @@ if process_as_three_comp and len(all_component_data) == 3:
                         figsize=(10, 2.2 * panels_in_fig),
                         sharex=True,
                         sharey=False,
+                    )
+                    set_figure_title(
+                        fig_ind,
+                        f"{eve_id} {comp_title} individual seismograms fig {fig_idx + 1}",
                     )
                     if panels_in_fig == 1:
                         axes_ind = [axes_ind]
@@ -1459,58 +1493,60 @@ if process_as_three_comp and len(all_component_data) == 3:
                     ind_file = save_dir / (
                         f"{eve_id}_{comp_title}_individual_seismograms_{align_phase}_fig{fig_idx + 1}.png"
                     )
-                    #plt.savefig(ind_file, dpi=300, bbox_inches='tight')
+                    fig_ind.savefig(ind_file, dpi=300, bbox_inches='tight')
                     print(f"✓ Individual seismograms plot saved to: {ind_file}")
         except Exception as e:
             print(f"[WARN] Failed to create individual seismograms plots (3 components): {e}")
 
     # ===================== Station maps: pass r_win (3 components) =====================
-    try:
-        fig_map, axes_map = plt.subplots(1, 3, figsize=(14, 4.5), sharex=True, sharey=True)
-        comp_order = ['DPZ', 'R', 'T']
-        comp_titles_map = ['Z', 'R', 'T']
+    if show_station_map_3comp_plot:
+        try:
+            fig_map, axes_map = plt.subplots(1, 3, figsize=(14, 4.5), sharex=True, sharey=True)
+            set_figure_title(fig_map, f"{eve_id} station pass map (3-comp)")
+            comp_order = ['DPZ', 'R', 'T']
+            comp_titles_map = ['Z', 'R', 'T']
 
-        for j, comp_name in enumerate(comp_order):
-            axm = axes_map[j]
-            if comp_name not in all_component_data:
-                axm.set_axis_off()
-                continue
+            for j, comp_name in enumerate(comp_order):
+                axm = axes_map[j]
+                if comp_name not in all_component_data:
+                    axm.set_axis_off()
+                    continue
 
-            data = all_component_data[comp_name]
-            station_ll = data.get('station_ll', {})
-            tr_map = data.get('aligned_traces_by_station', {})
-            all_stations = sorted(tr_map.keys(), key=lambda s: int(s))
-            pass_set = set(data.get('pass_window_ids', []))
+                data = all_component_data[comp_name]
+                station_ll = data.get('station_ll', {})
+                tr_map = data.get('aligned_traces_by_station', {})
+                all_stations = sorted(tr_map.keys(), key=lambda s: int(s))
+                pass_set = set(data.get('pass_window_ids', []))
 
-            pass_lats = [station_ll[s][0] for s in all_stations if s in pass_set and s in station_ll]
-            pass_lons = [station_ll[s][1] for s in all_stations if s in pass_set and s in station_ll]
-            fail_lats = [station_ll[s][0] for s in all_stations if s not in pass_set and s in station_ll]
-            fail_lons = [station_ll[s][1] for s in all_stations if s not in pass_set and s in station_ll]
+                pass_lats = [station_ll[s][0] for s in all_stations if s in pass_set and s in station_ll]
+                pass_lons = [station_ll[s][1] for s in all_stations if s in pass_set and s in station_ll]
+                fail_lats = [station_ll[s][0] for s in all_stations if s not in pass_set and s in station_ll]
+                fail_lons = [station_ll[s][1] for s in all_stations if s not in pass_set and s in station_ll]
 
-            if len(fail_lons) > 0:
-                axm.scatter(fail_lons, fail_lats, s=16, c='0.7', label='Fail')
-            if len(pass_lons) > 0:
-                axm.scatter(pass_lons, pass_lats, s=20, c='C3', label='Pass')
+                if len(fail_lons) > 0:
+                    axm.scatter(fail_lons, fail_lats, s=16, c='0.7', label='Fail')
+                if len(pass_lons) > 0:
+                    axm.scatter(pass_lons, pass_lats, s=20, c='C3', label='Pass')
 
-            axm.set_title(comp_titles_map[j], fontsize=12, fontweight='bold')
-            if j == 0:
-                axm.set_ylabel('Latitude')
-            axm.grid(alpha=0.3)
-            axm.set_xlabel('Longitude')
-            axm.legend(loc='upper right', fontsize=8)
+                axm.set_title(comp_titles_map[j], fontsize=12, fontweight='bold')
+                if j == 0:
+                    axm.set_ylabel('Latitude')
+                axm.grid(alpha=0.3)
+                axm.set_xlabel('Longitude')
+                axm.legend(loc='upper right', fontsize=8)
 
-        fig_map.suptitle(
-            f'Event {eve_id} - Stations passing thresholds ({align_phase})',
-            fontsize=13,
-            fontweight='bold'
-        )
-        plt.tight_layout()
+            fig_map.suptitle(
+                f'Event {eve_id} - Stations passing thresholds ({align_phase})',
+                fontsize=13,
+                fontweight='bold'
+            )
+            plt.tight_layout()
 
-        map_file = save_dir / f"{eve_id}_station_pass_map_{align_phase}.png"
-        #plt.savefig(map_file, dpi=300, bbox_inches='tight')
-        print(f"✓ Station pass/fail map saved to: {map_file}")
-    except Exception as e:
-        print(f"[WARN] Failed to create station pass/fail map (3 components): {e}")
+            map_file = save_dir / f"{eve_id}_station_pass_map_{align_phase}.png"
+            fig_map.savefig(map_file, dpi=300, bbox_inches='tight')
+            print(f"✓ Station pass/fail map saved to: {map_file}")
+        except Exception as e:
+            print(f"[WARN] Failed to create station pass/fail map (3 components): {e}")
 
     # ===================== Shift comparison plot: Radial vs Transverse =====================
     if show_diff_rt_plot:
@@ -1541,6 +1577,7 @@ if process_as_three_comp and len(all_component_data) == 3:
                 
                 # Create comparison figure
                 fig_shift, axes = plt.subplots(2, 3, figsize=(18, 10))
+                set_figure_title(fig_shift, f"{eve_id} shift comparison")
                 (ax1, ax2, ax5), (ax3, ax4, ax6) = axes
                 
                 # Panel 1: Scatter plot R vs T
@@ -1650,6 +1687,7 @@ if process_as_three_comp and len(all_component_data) == 3:
         print("Creating estimated vs calculated shift plot (3 components)...")
 
         fig_ec, axes_ec = plt.subplots(1, 3, figsize=(15, 4.2), sharex=True, sharey=True)
+        set_figure_title(fig_ec, f"{eve_id} est vs calc shifts (3-comp)")
         comp_order = ['DPZ', 'R', 'T']
         comp_titles_ec = ['Z', 'R', 'T']
 
@@ -1693,11 +1731,12 @@ if process_as_three_comp and len(all_component_data) == 3:
         plt.tight_layout()
 
         estcalc_file = save_dir / f"{eve_id}_est_vs_calc_shift_{align_phase}.png"
-        #plt.savefig(estcalc_file, dpi=300, bbox_inches='tight')
+        fig_ec.savefig(estcalc_file, dpi=300, bbox_inches='tight')
         print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
 
         # Show all figures together (three-component + shift comparison)
         # plt.show()
 
     # ===================== Show all figures together at the end =====================
-    plt.show()
+    if show_plots:
+        plt.show()
