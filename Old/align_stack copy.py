@@ -14,9 +14,9 @@ from scipy.signal import hilbert
 from scipy.signal.windows import gaussian
 
 min_freq, max_freq            = 3.0, 10.0 # Bandpass filter (Hz)
-# start_time, end_time          = -10.0, 20 # Plotting time window (seconds since origin)
+start_time, end_time          = -10.0, 20 # Plotting time window (seconds since origin)
 # start_time, end_time          = -1990.0, 3690.0 # Plotting time window (seconds since origin)
-start_time, end_time          = -1990.0, 15000 # Plotting time window (seconds since origin)
+# start_time, end_time          = -1990.0, 15000 # Plotting time window (seconds since origin)
 win_pre, win_post             = 0.5,  0.5 # Correlation window parameters (seconds)
 r_window_min                  = 0.7       # Minimum correlation coefficient for trace selection
 move_limit_sec                = 0.05      # Maximum allowed shift (seconds) searched in compute_lag
@@ -37,8 +37,8 @@ info_root = Path(path_prefix + "20220930_events_cut/event_sta_info")
 sps_rate = "down100"
 data_path = Path(path_prefix + "20220930_events_cut/20220930_" + sps_rate)
 
-event       = "CI_40353544" # Single run selection (used when the corresponding "all_*" is False)
-# event       = "CI_40353664" # Single run selection (used when the corresponding "all_*" is False)
+event       = "CI_40353664" # Single run selection (used when the corresponding "all_*" is False)
+# event       = "CI_40353544" # Single run selection (used when the corresponding "all_*" is False)
 events = [event]        # Allows for future modification to process multiple events
 
 # plotting options (user-facing)
@@ -1694,14 +1694,9 @@ if process_as_three_comp and len(all_component_data) == 3:
         if len(common_stations) > 0:
             # Extract shifts in seconds (remove predicted shift per station)
             stations = sorted(common_stations, key=lambda s: int(s))
-            r_lags = np.array([r_shifts[sta]['lag_seconds'] - r_calc[sta] for sta in stations], dtype=float)
-            t_lags = np.array([t_shifts[sta]['lag_seconds'] - t_calc[sta] for sta in stations], dtype=float)
-            station_nums = np.array([int(sta) for sta in stations], dtype=int)
-
-            pass_r = set(all_component_data['R'].get('pass_window_ids', []))
-            pass_t = set(all_component_data['T'].get('pass_window_ids', []))
-            pass_mask = np.array([(sta in pass_r) and (sta in pass_t) for sta in stations], dtype=bool)
-            fail_mask = ~pass_mask
+            r_lags = [r_shifts[sta]['lag_seconds'] - r_calc[sta] for sta in stations]
+            t_lags = [t_shifts[sta]['lag_seconds'] - t_calc[sta] for sta in stations]
+            station_nums = [int(sta) for sta in stations]
                 
             # Create comparison figure
             fig_shift, axes = plt.subplots(2, 3, figsize=(18, 10))
@@ -1709,9 +1704,7 @@ if process_as_three_comp and len(all_component_data) == 3:
             (ax1, ax2, ax5), (ax3, ax4, ax6) = axes
 
             # Panel 1: Scatter plot R vs T (residuals after predicted shift removal)
-            ax1.scatter(r_lags[pass_mask], t_lags[pass_mask], alpha=0.6, s=20, color='k', label='Pass r_win')
-            if np.any(fail_mask):
-                ax1.scatter(r_lags[fail_mask], t_lags[fail_mask], alpha=0.8, s=24, color='red', label='Fail r_win')
+            ax1.scatter(r_lags, t_lags, alpha=0.5, s=20)
             ax1.plot([min(r_lags + t_lags), max(r_lags + t_lags)],
                     [min(r_lags + t_lags), max(r_lags + t_lags)],
                     'r--', alpha=0.5, label='1:1 line')
@@ -1744,13 +1737,9 @@ if process_as_three_comp and len(all_component_data) == 3:
             # Panel 3: Max correlation R vs T
             if len(common_corr_stations) > 0:
                 corr_stations = sorted(common_corr_stations, key=lambda s: int(s))
-                r_corr_vals = np.array([r_corr[sta] for sta in corr_stations], dtype=float)
-                t_corr_vals = np.array([t_corr[sta] for sta in corr_stations], dtype=float)
-                pass_mask_corr = np.array([(sta in pass_r) and (sta in pass_t) for sta in corr_stations], dtype=bool)
-                fail_mask_corr = ~pass_mask_corr
-                ax5.scatter(r_corr_vals[pass_mask_corr], t_corr_vals[pass_mask_corr], alpha=0.6, s=20, color='k', label='Pass r_win')
-                if np.any(fail_mask_corr):
-                    ax5.scatter(r_corr_vals[fail_mask_corr], t_corr_vals[fail_mask_corr], alpha=0.8, s=24, color='red', label='Fail r_win')
+                r_corr_vals = [r_corr[sta] for sta in corr_stations]
+                t_corr_vals = [t_corr[sta] for sta in corr_stations]
+                ax5.scatter(r_corr_vals, t_corr_vals, alpha=0.5, s=20)
                 ax5.plot([0, 1], [0, 1], 'r--', alpha=0.5, label='1:1 line')
                 ax5.set_xlabel('Radial max corr', fontsize=11)
                 ax5.set_ylabel('Transverse max corr', fontsize=11)
@@ -1763,11 +1752,8 @@ if process_as_three_comp and len(all_component_data) == 3:
                 ax5.set_axis_off()
             
             # Panel 3: Residual shifts vs station number
-            ax3.plot(station_nums, r_lags, 'o-', label='Radial', alpha=0.5, markersize=4, color='0.4')
-            ax3.plot(station_nums, t_lags, 's-', label='Transverse', alpha=0.5, markersize=4, color='0.4')
-            if np.any(fail_mask):
-                ax3.scatter(station_nums[fail_mask], r_lags[fail_mask], color='red', s=24, marker='o', label='Fail r_win')
-                ax3.scatter(station_nums[fail_mask], t_lags[fail_mask], color='red', s=24, marker='s')
+            ax3.plot(station_nums, r_lags, 'o-', label='Radial', alpha=0.7, markersize=4)
+            ax3.plot(station_nums, t_lags, 's-', label='Transverse', alpha=0.7, markersize=4)
             ax3.set_xlabel('Station number', fontsize=11)
             ax3.set_ylabel('Residual shift (s)', fontsize=11)
             ax3.set_title('Residuals vs Station', fontsize=12, fontweight='bold')
@@ -1840,7 +1826,6 @@ if process_as_three_comp and len(all_component_data) == 3:
         data = all_component_data[comp_name]
         station_shifts = data.get('station_shifts', {})
         calc_shifts = data.get('calc_shifts', {})
-        pass_set = set(data.get('pass_window_ids', []))
 
         common_sta = set(calc_shifts.keys()) & set(station_shifts.keys())
         if len(common_sta) == 0:
@@ -1851,12 +1836,8 @@ if process_as_three_comp and len(all_component_data) == 3:
         stations = sorted(common_sta, key=lambda s: int(s))
         est_shift = np.array([station_shifts[s]['lag_seconds'] for s in stations], dtype=float)
         calc_shift = np.array([calc_shifts[s] for s in stations], dtype=float)
-        pass_mask = np.array([s in pass_set for s in stations], dtype=bool)
-        fail_mask = ~pass_mask
 
-        axc.scatter(calc_shift[pass_mask], est_shift[pass_mask], s=18, alpha=0.6, color='k', label='Pass r_win')
-        if np.any(fail_mask):
-            axc.scatter(calc_shift[fail_mask], est_shift[fail_mask], s=22, alpha=0.8, color='red', label='Fail r_win')
+        axc.scatter(calc_shift, est_shift, s=18, alpha=0.6)
 
         minv = float(min(np.min(calc_shift), np.min(est_shift)))
         maxv = float(max(np.max(calc_shift), np.max(est_shift)))
@@ -1881,7 +1862,6 @@ if process_as_three_comp and len(all_component_data) == 3:
         axc.set_xlabel('Calculated shift (s)', fontsize=10)
         if j == 0:
             axc.set_ylabel('Estimated shift (s)', fontsize=10)
-        axc.legend(loc='upper left', fontsize=8)
 
         fig_ec.suptitle(
             f'Event {eve_id} - Estimated vs Calculated shifts ({align_phase})',

@@ -4,17 +4,19 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from pathlib import Path
 from datetime import timedelta, timezone
+import time
 
-from obspy import read, UTCDateTime, Stream
+from obspy import read, UTCDateTime, Stream, Trace
 from obspy.geodetics import degrees2kilometers, locations2degrees, gps2dist_azimuth
 from obspy.taup import TauPyModel
 from obspy.signal.rotate import rotate_ne_rt
 from scipy.signal import hilbert
 from scipy.signal.windows import gaussian
 
-min_freq, max_freq            = 1.0, 5.0 # Bandpass filter (Hz)
+min_freq, max_freq            = 3.0, 10.0 # Bandpass filter (Hz)
+# start_time, end_time          = -10.0, 20 # Plotting time window (seconds since origin)
 # start_time, end_time          = -1990.0, 3690.0 # Plotting time window (seconds since origin)
-start_time, end_time          = 0.0, 100.0 # Plotting time window (seconds since origin)
+start_time, end_time          = -1990.0, 15000 # Plotting time window (seconds since origin)
 win_pre, win_post             = 0.5,  0.5 # Correlation window parameters (seconds)
 r_window_min                  = 0.7       # Minimum correlation coefficient for trace selection
 move_limit_sec                = 0.05      # Maximum allowed shift (seconds) searched in compute_lag
@@ -23,19 +25,43 @@ move_limit_sec                = 0.05      # Maximum allowed shift (seconds) sear
 all_channels = True  # If True to process all channels
 component   = "R"       # Component selection: 'Z', 'R', or 'T'
 align_phase = "S"       # Alignment phase 'P' or 'S'
-
-event       = "CI_40353544" # Single run selection (used when the corresponding "all_*" is False)
-events = [event]        # Allows for future modification to process multiple events
+verbose     = False     # If True, print detailed processing info
 
 # Paths
 path_prefix = "/Users/vidale/Documents/Research/Mingze_SJF/"
 info_root = Path(path_prefix + "20220930_events_cut/event_sta_info")
-data_path = Path(path_prefix + "20220930_events_cut/07_1hour_20220930")
+
+# sps_rate = "down50"  # Subdirectory name indicating the sampling rate of the data (e.g., "down50", "down100", etc.)
+# data_path = Path(path_prefix + "20220930_events_cut/07_1hour_20220930")
+
+sps_rate = "down100"
+data_path = Path(path_prefix + "20220930_events_cut/20220930_" + sps_rate)
+
+event       = "CI_40353544" # Single run selection (used when the corresponding "all_*" is False)
+# event       = "CI_40353664" # Single run selection (used when the corresponding "all_*" is False)
+events = [event]        # Allows for future modification to process multiple events
 
 # plotting options (user-facing)
 show_individual_seismograms = False  # Plot individual seismograms (20 traces/plot, 5 panels/figure)
 show_record_section_plot = False  # Show aligned record sections (single + 3-comp)
 
+
+# Timing (cpu and wall)
+_start_cpu_time = time.process_time()
+_start_wall_time = time.perf_counter()
+_timing_reported = False
+
+
+catalog_local_file = info_root / "catalog_local_hand.xlsx"
+catalog_local = None
+try:
+    if catalog_local_file.exists():
+        catalog_local = pd.read_excel(catalog_local_file)
+        print(f"Loaded catalog: {catalog_local_file}")
+    else:
+        print(f"[WARN] Catalog not found: {catalog_local_file}")
+except Exception as e:
+    print(f"[WARN] Failed to read catalog: {catalog_local_file} ({e})")
 
 # Travel-time model
 model = TauPyModel(model="iasp91")
@@ -93,6 +119,43 @@ def set_figure_title(fig, title: str) -> None:
         fig.canvas.manager.set_window_title(title)
     except Exception:
         pass
+
+
+def report_timing_once() -> None:
+    """Report cpu and wall time before showing plots."""
+    global _timing_reported
+    if _timing_reported:
+        return
+    cpu_sec = time.process_time() - _start_cpu_time
+    wall_sec = time.perf_counter() - _start_wall_time
+    print(f"\033[31mTiming: cpu={cpu_sec:.2f}s  wall={wall_sec:.2f}s\033[0m")
+    _timing_reported = True
+
+
+def add_catalog_event_lines(ax, origin_time, catalog_df, tmin, tmax) -> None:
+    """Draw vertical lines for each catalog event time on a time-since-origin axis."""
+    if origin_time is None or catalog_df is None:
+        return
+    if "origin_time" not in catalog_df.columns:
+        print("[WARN] Catalog missing 'origin_time' column; no event lines drawn.")
+        return
+
+    color_map = {0: "red", 1: "black", 2: "green"}
+    for _, row in catalog_df.iterrows():
+        try:
+            evt_time = UTCDateTime(str(row["origin_time"]))
+        except Exception:
+            continue
+        dt = float(evt_time - origin_time)
+        if dt < tmin or dt > tmax:
+            continue
+        skip_val = row.get("skip", 0)
+        try:
+            skip_int = int(skip_val)
+        except Exception:
+            skip_int = 0
+        color = color_map.get(skip_int, "red")
+        ax.axvline(x=dt, color=color, lw=1.1, alpha=0.8, zorder=6)
 
 # ===================== Channel / component selection =====================
 # User-facing components: Z, R, T
@@ -156,6 +219,7 @@ for idx, channel in enumerate(channels):
         # ---- Read waveforms for all stations ----
         st_all = Stream()
         stanum = 0
+        raw_limits_by_station = {}
 
         for sta, (slat, slon) in name2ll.items():
             code_num = int(sta)
@@ -178,17 +242,21 @@ for idx, channel in enumerate(channels):
                     data_path
                     / code_str
                     / f"{ch_read}.D"
-                    / f"7V.{code_str}.00.{ch_read}.D.2022.273.down50.mseed"
+                    / f"7V.{code_str}.00.{ch_read}.D.2022.273.{sps_rate}.mseed"
                 )
-                if stanum % 20 == 0:
-                    print(f"Reading station {sta} channel {ch_read} from {fpath}")
+                if verbose:
+                    if stanum % 20 == 0:
+                        print(f"Reading station {sta} channel {ch_read} from {fpath}")
                 if not fpath.exists():
-                    print("No such file")
+                    if verbose:
+                        print("No such file")
                     continue
 
                 # Read the component and slice [origin + start_time, origin + end_time]
-                tr = read(str(fpath))[0]
-                tr = tr.slice(starttime=origin + start_time, endtime=origin + end_time)
+                tr_raw = read(str(fpath))[0]
+                if sta not in raw_limits_by_station:
+                    raw_limits_by_station[sta] = (tr_raw.stats.starttime, tr_raw.stats.endtime)
+                tr = tr_raw.slice(starttime=origin + start_time, endtime=origin + end_time)
                 if (tr is None) or (tr.stats.npts == 0):
                     continue
 
@@ -202,7 +270,7 @@ for idx, channel in enumerate(channels):
                 # Count stations (once per station)
                 if first_chan_for_sta:
                     stanum += 1
-                    if stanum % 20 == 0:
+                    if stanum % 100 == 0:
                         print(f"Event {eve_id}: processed {stanum} stations...")
                     first_chan_for_sta = False
 
@@ -212,38 +280,7 @@ for idx, channel in enumerate(channels):
             print(f"No traces found for event {eve_id}, skip.")
             continue
 
-        ref_deg = float(st_all[0].stats.dist_deg)
-        print(f"    Epicentral distance ≈ {st_all[0].stats.dist_km:.1f} km")
-
-        # ---- Theoretical travel times (nearest station) ----
-        tts = model.get_travel_times(
-            source_depth_in_km=event_depth,
-            distance_in_degree=ref_deg,
-            phase_list=["p", "P", "s", "S"],
-        )
-
-        p_traveltime = None
-        s_traveltime = None
-        p_arrival_time = None
-        s_arrival_time = None
-
-        for tt in reversed(tts):
-            if tt.phase.name.upper() == "P":
-                p_traveltime = float(tt.time)
-                p_arrival_time = origin + p_traveltime
-            if tt.phase.name.upper() == "S":
-                s_traveltime = float(tt.time)
-                s_arrival_time = origin + s_traveltime
-
-        if align_phase == "P" and p_traveltime is not None:
-            phase_traveltime = float(p_traveltime)  # seconds since origin
-        elif align_phase == "S" and s_traveltime is not None:
-            phase_traveltime = float(s_traveltime)
-        else:
-            print("    No valid phase for alignment. Skip array.")
-            continue
-        # Theoretical arrival time (nearest station) used for reference in shift calculations/plots
-        t_ref = phase_traveltime
+        # (Reference travel times are computed after picking the reference station.)
 
         # ---- Keep traces that cover [origin + start_time, origin + end_time] ----
         st_window = Stream()
@@ -309,17 +346,99 @@ for idx, channel in enumerate(channels):
         else:
             st_comp = st_window.select(channel=channel)
 
-        # ---- Auto-select reference station: nearest trace by epicentral distance ----
+        # ---- Auto-select reference station: closest to array center ----
         st_comp.sort(keys=["dist_km"])
         if len(st_comp) == 0:
             continue
 
-        ref_station_id = str(st_comp[0].stats.station)
-        ref_trace_dur = float(st_comp[0].stats.npts) / float(st_comp[0].stats.sampling_rate)
+        station_ids = sorted({str(tr.stats.station) for tr in st_comp})
+        center_lats = [name2ll[s][0] for s in station_ids if s in name2ll]
+        center_lons = [name2ll[s][1] for s in station_ids if s in name2ll]
+
+        ref_station_id = None
+        if len(center_lats) > 0 and len(center_lons) > 0:
+            center_lat = float(np.mean(center_lats))
+            center_lon = float(np.mean(center_lons))
+            best_dist_m = None
+            for sid in station_ids:
+                if sid not in name2ll:
+                    continue
+                slat, slon = name2ll[sid]
+                dist_m, _, _ = gps2dist_azimuth(center_lat, center_lon, slat, slon)
+                if best_dist_m is None or dist_m < best_dist_m:
+                    best_dist_m = dist_m
+                    ref_station_id = sid
+
+        if ref_station_id is None:
+            ref_station_id = str(st_comp[0].stats.station)
+
+        ref_trace = st_comp.select(station=ref_station_id)
+        if len(ref_trace) == 0:
+            ref_trace = [st_comp[0]]
+            ref_station_id = str(ref_trace[0].stats.station)
+        ref_trace = ref_trace[0]
+
+        ref_trace_dur = float(ref_trace.stats.npts) / float(ref_trace.stats.sampling_rate)
         print(
-            f"    Reference station (auto): {ref_station_id} (nearest)  "
-            f"dist_km={st_comp[0].stats.dist_km:.2f}  dur_s={ref_trace_dur:.2f}"
+            f"    Reference station (auto): {ref_station_id} (closest to array center)  "
+            f"dist_km={ref_trace.stats.dist_km:.2f}  dur_s={ref_trace_dur:.2f}"
         )
+        print(f"    Epicentral distance ≈ {ref_trace.stats.dist_km:.1f} km")
+        ref_start = ref_trace.stats.starttime
+        ref_end = ref_trace.stats.endtime
+        ref_start_dt = ref_start.datetime
+        ref_end_dt = ref_end.datetime
+        if ref_start_dt.tzinfo is None:
+            ref_start_dt = ref_start_dt.replace(tzinfo=timezone.utc)
+        if ref_end_dt.tzinfo is None:
+            ref_end_dt = ref_end_dt.replace(tzinfo=timezone.utc)
+        print(
+            "\033[32m    Reference seismogram UTC window: "
+            f"{ref_start_dt.isoformat()} to {ref_end_dt.isoformat()}\033[0m"
+        )
+        if ref_station_id in raw_limits_by_station:
+            raw_start, raw_end = raw_limits_by_station[ref_station_id]
+            raw_start_dt = raw_start.datetime
+            raw_end_dt = raw_end.datetime
+            if raw_start_dt.tzinfo is None:
+                raw_start_dt = raw_start_dt.replace(tzinfo=timezone.utc)
+            if raw_end_dt.tzinfo is None:
+                raw_end_dt = raw_end_dt.replace(tzinfo=timezone.utc)
+            print(
+                "\033[32m    Reference raw read UTC window: "
+                f"{raw_start_dt.isoformat()} to {raw_end_dt.isoformat()}\033[0m"
+            )
+
+        # ---- Theoretical travel times (reference station) ----
+        ref_deg = float(ref_trace.stats.dist_deg)
+        tts = model.get_travel_times(
+            source_depth_in_km=event_depth,
+            distance_in_degree=ref_deg,
+            phase_list=["p", "P", "s", "S"],
+        )
+
+        p_traveltime = None
+        s_traveltime = None
+        p_arrival_time = None
+        s_arrival_time = None
+
+        for tt in reversed(tts):
+            if tt.phase.name.upper() == "P":
+                p_traveltime = float(tt.time)
+                p_arrival_time = origin + p_traveltime
+            if tt.phase.name.upper() == "S":
+                s_traveltime = float(tt.time)
+                s_arrival_time = origin + s_traveltime
+
+        if align_phase == "P" and p_traveltime is not None:
+            phase_traveltime = float(p_traveltime)  # seconds since origin
+        elif align_phase == "S" and s_traveltime is not None:
+            phase_traveltime = float(s_traveltime)
+        else:
+            print("    No valid phase for alignment. Skip array.")
+            continue
+        # Theoretical arrival time (reference station) used for reference in shift calculations/plots
+        t_ref = phase_traveltime
 
         num_traces = len(st_comp)
         print(f"    {num_traces} traces on {plot_comp}")
@@ -343,7 +462,7 @@ for idx, channel in enumerate(channels):
         # ---- Common length / sampling rate ----
         npts = min(tr.stats.npts for tr in st_comp)
         sample_rate = float(st_comp[0].stats.sampling_rate)
-        ref = st_comp[0].data[:npts]
+        ref = ref_trace.data[:npts]
         move_limit_samples = int(round(move_limit_sec * sample_rate))
         print(f"    sample_rate = {sample_rate:.1f} Hz")
 
@@ -362,7 +481,7 @@ for idx, channel in enumerate(channels):
             if mx > 0:
                 tr.data = tr.data / mx
 
-        # ---- Theoretical (TauP) shift per station relative to nearest station ----
+        # ---- Theoretical (TauP) shift per station relative to reference station ----
         calc_shifts = {}
         if t_ref is not None:
             phase_key = align_phase.upper()
@@ -623,7 +742,7 @@ for idx, channel in enumerate(channels):
             ax.set_title(f"Aligned {align_phase} waveforms Event {eve_id} comp = {plot_comp}")
             ax.grid(alpha=0.2)
 
-        # Theoretical arrival time (nearest station) as a vertical reference line
+        # Theoretical arrival time (reference station) as a vertical reference line
         if show_record_section_plot:
             try:
                 if t_ref is not None:
@@ -770,6 +889,7 @@ for idx, channel in enumerate(channels):
                         fontweight='bold',
                     )
                     ax_env.grid(alpha=0.2)
+                    add_catalog_event_lines(ax_env, origin, catalog_local, start_time, end_time)
                     fig_env.subplots_adjust(bottom=0.28)
 
                     if origin is not None:
@@ -1012,6 +1132,7 @@ for idx, channel in enumerate(channels):
                 print(f"[WARN] Failed to create station pass/fail maps: {e}")
 
             # Show figures for single-component mode
+            report_timing_once()
             plt.show()
 
 
@@ -1182,6 +1303,23 @@ if process_as_three_comp and len(all_component_data) == 3:
 
         stack_by_comp[comp_name] = stack_vec
 
+    if all(comp in stack_by_comp for comp in comp_order):
+        save_path = Path(path_prefix + "output")
+        save_dir = save_path / eve_id
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        for comp_name in comp_order:
+            stack_vec = stack_by_comp[comp_name]
+            tr = Trace(data=stack_vec.astype(np.float32, copy=False))
+            tr.stats.starttime = origin_env + start_time
+            tr.stats.sampling_rate = float(sample_rate_env)
+            tr.stats.station = "STACK"
+            tr.stats.channel = comp_name
+            st_out = Stream(traces=[tr])
+            out_file = save_dir / f"{eve_id}_{comp_name}_stack.mseed"
+            st_out.write(str(out_file), format="MSEED")
+            print(f"✓ Wrote stack mseed: {out_file}")
+
     if show_record_section_plot:
         fig.suptitle(f'Event {eve_id} - Aligned {align_phase} waveforms (3 components)',
                     fontsize=14, fontweight='bold')
@@ -1226,6 +1364,7 @@ if process_as_three_comp and len(all_component_data) == 3:
                 fontweight='bold',
             )
             ax_env.grid(alpha=0.2)
+            add_catalog_event_lines(ax_env, origin_env, catalog_local, start_time, end_time)
             fig_env.subplots_adjust(bottom=0.28)
 
             if origin_env is not None:
@@ -1544,36 +1683,50 @@ if process_as_three_comp and len(all_component_data) == 3:
         t_shifts = all_component_data['T']['station_shifts']
         r_corr = all_component_data['R']['station_corr']
         t_corr = all_component_data['T']['station_corr']
+        r_calc = all_component_data['R'].get('calc_shifts', {})
+        t_calc = all_component_data['T'].get('calc_shifts', {})
         
-        # Find common stations
+        # Find common stations (require predicted shifts for residual plotting)
         common_stations = set(r_shifts.keys()) & set(t_shifts.keys())
+        common_stations = common_stations & set(r_calc.keys()) & set(t_calc.keys())
         common_corr_stations = set(r_corr.keys()) & set(t_corr.keys())
 
         if len(common_stations) > 0:
-            # Extract shifts in seconds
+            # Extract shifts in seconds (remove predicted shift per station)
             stations = sorted(common_stations, key=lambda s: int(s))
-            r_lags = [r_shifts[sta]['lag_seconds'] for sta in stations]
-            t_lags = [t_shifts[sta]['lag_seconds'] for sta in stations]
-            station_nums = [int(sta) for sta in stations]
+            r_lags = np.array([r_shifts[sta]['lag_seconds'] - r_calc[sta] for sta in stations], dtype=float)
+            t_lags = np.array([t_shifts[sta]['lag_seconds'] - t_calc[sta] for sta in stations], dtype=float)
+            station_nums = np.array([int(sta) for sta in stations], dtype=int)
+
+            pass_r = set(all_component_data['R'].get('pass_window_ids', []))
+            pass_t = set(all_component_data['T'].get('pass_window_ids', []))
+            pass_mask = np.array([(sta in pass_r) and (sta in pass_t) for sta in stations], dtype=bool)
+            fail_mask = ~pass_mask
                 
             # Create comparison figure
             fig_shift, axes = plt.subplots(2, 3, figsize=(18, 10))
             set_figure_title(fig_shift, f"{eve_id} shift comparison")
             (ax1, ax2, ax5), (ax3, ax4, ax6) = axes
-            
-            # Panel 1: Scatter plot R vs T
-            ax1.scatter(r_lags, t_lags, alpha=0.5, s=20)
+
+            # Panel 1: Scatter plot R vs T (residuals after predicted shift removal)
+            ax1.scatter(r_lags[pass_mask], t_lags[pass_mask], alpha=0.6, s=20, color='k', label='Pass r_win')
+            if np.any(fail_mask):
+                ax1.scatter(r_lags[fail_mask], t_lags[fail_mask], alpha=0.8, s=24, color='red', label='Fail r_win')
             ax1.plot([min(r_lags + t_lags), max(r_lags + t_lags)],
                     [min(r_lags + t_lags), max(r_lags + t_lags)],
                     'r--', alpha=0.5, label='1:1 line')
-            ax1.set_xlabel('Radial shift (seconds)', fontsize=11)
-            ax1.set_ylabel('Transverse shift (seconds)', fontsize=11)
-            ax1.set_title('Radial vs Transverse Shifts', fontsize=12, fontweight='bold')
+            ax1.set_xlabel('Radial residual shift (s)', fontsize=11)
+            ax1.set_ylabel('Transverse residual shift (s)', fontsize=11)
+            ax1.set_title('Radial vs Transverse Residuals', fontsize=12, fontweight='bold')
+            ax1.axvline(-move_limit_sec, color='0.4', linestyle=':', linewidth=1.2)
+            ax1.axvline(move_limit_sec, color='0.4', linestyle=':', linewidth=1.2)
+            ax1.axhline(-move_limit_sec, color='0.4', linestyle=':', linewidth=1.2)
+            ax1.axhline(move_limit_sec, color='0.4', linestyle=':', linewidth=1.2)
             ax1.grid(alpha=0.3)
             ax1.legend()
             ax1.set_aspect('equal', adjustable='box')
                 
-            # Panel 2: Difference histogram
+            # Panel 2: Difference histogram (residuals)
             diff_lags = np.array(r_lags) - np.array(t_lags)
             # Fraction of stations with zero R–T shift difference
             # (shifts are derived from integer-sample lags; use tiny atol for float safety)
@@ -1582,18 +1735,22 @@ if process_as_three_comp and len(all_component_data) == 3:
             ax2.axvline(0, color='r', linestyle='--', linewidth=2, label='Zero difference')
             ax2.axvline(np.median(diff_lags), color='g', linestyle='--', linewidth=2,
                         label=f'Median = {np.median(diff_lags):.3f}s')
-            ax2.set_xlabel('R shift - T shift (seconds)', fontsize=11)
+            ax2.set_xlabel('R residual - T residual (s)', fontsize=11)
             ax2.set_ylabel('Count', fontsize=11)
-            ax2.set_title('Shift Difference Distribution', fontsize=12, fontweight='bold')
+            ax2.set_title('Residual Difference Distribution', fontsize=12, fontweight='bold')
             ax2.legend()
             ax2.grid(alpha=0.3)
 
             # Panel 3: Max correlation R vs T
             if len(common_corr_stations) > 0:
                 corr_stations = sorted(common_corr_stations, key=lambda s: int(s))
-                r_corr_vals = [r_corr[sta] for sta in corr_stations]
-                t_corr_vals = [t_corr[sta] for sta in corr_stations]
-                ax5.scatter(r_corr_vals, t_corr_vals, alpha=0.5, s=20)
+                r_corr_vals = np.array([r_corr[sta] for sta in corr_stations], dtype=float)
+                t_corr_vals = np.array([t_corr[sta] for sta in corr_stations], dtype=float)
+                pass_mask_corr = np.array([(sta in pass_r) and (sta in pass_t) for sta in corr_stations], dtype=bool)
+                fail_mask_corr = ~pass_mask_corr
+                ax5.scatter(r_corr_vals[pass_mask_corr], t_corr_vals[pass_mask_corr], alpha=0.6, s=20, color='k', label='Pass r_win')
+                if np.any(fail_mask_corr):
+                    ax5.scatter(r_corr_vals[fail_mask_corr], t_corr_vals[fail_mask_corr], alpha=0.8, s=24, color='red', label='Fail r_win')
                 ax5.plot([0, 1], [0, 1], 'r--', alpha=0.5, label='1:1 line')
                 ax5.set_xlabel('Radial max corr', fontsize=11)
                 ax5.set_ylabel('Transverse max corr', fontsize=11)
@@ -1605,12 +1762,15 @@ if process_as_three_comp and len(all_component_data) == 3:
                 ax5.text(0.5, 0.5, 'No common corr stations', ha='center', va='center')
                 ax5.set_axis_off()
             
-            # Panel 3: Shifts vs station number
-            ax3.plot(station_nums, r_lags, 'o-', label='Radial', alpha=0.7, markersize=4)
-            ax3.plot(station_nums, t_lags, 's-', label='Transverse', alpha=0.7, markersize=4)
+            # Panel 3: Residual shifts vs station number
+            ax3.plot(station_nums, r_lags, 'o-', label='Radial', alpha=0.5, markersize=4, color='0.4')
+            ax3.plot(station_nums, t_lags, 's-', label='Transverse', alpha=0.5, markersize=4, color='0.4')
+            if np.any(fail_mask):
+                ax3.scatter(station_nums[fail_mask], r_lags[fail_mask], color='red', s=24, marker='o', label='Fail r_win')
+                ax3.scatter(station_nums[fail_mask], t_lags[fail_mask], color='red', s=24, marker='s')
             ax3.set_xlabel('Station number', fontsize=11)
-            ax3.set_ylabel('Shift (seconds)', fontsize=11)
-            ax3.set_title('Shifts vs Station', fontsize=12, fontweight='bold')
+            ax3.set_ylabel('Residual shift (s)', fontsize=11)
+            ax3.set_title('Residuals vs Station', fontsize=12, fontweight='bold')
             ax3.legend()
             ax3.grid(alpha=0.3)
             
@@ -1680,6 +1840,7 @@ if process_as_three_comp and len(all_component_data) == 3:
         data = all_component_data[comp_name]
         station_shifts = data.get('station_shifts', {})
         calc_shifts = data.get('calc_shifts', {})
+        pass_set = set(data.get('pass_window_ids', []))
 
         common_sta = set(calc_shifts.keys()) & set(station_shifts.keys())
         if len(common_sta) == 0:
@@ -1690,18 +1851,37 @@ if process_as_three_comp and len(all_component_data) == 3:
         stations = sorted(common_sta, key=lambda s: int(s))
         est_shift = np.array([station_shifts[s]['lag_seconds'] for s in stations], dtype=float)
         calc_shift = np.array([calc_shifts[s] for s in stations], dtype=float)
+        pass_mask = np.array([s in pass_set for s in stations], dtype=bool)
+        fail_mask = ~pass_mask
 
-        axc.scatter(calc_shift, est_shift, s=18, alpha=0.6)
+        axc.scatter(calc_shift[pass_mask], est_shift[pass_mask], s=18, alpha=0.6, color='k', label='Pass r_win')
+        if np.any(fail_mask):
+            axc.scatter(calc_shift[fail_mask], est_shift[fail_mask], s=22, alpha=0.8, color='red', label='Fail r_win')
 
         minv = float(min(np.min(calc_shift), np.min(est_shift)))
         maxv = float(max(np.max(calc_shift), np.max(est_shift)))
         axc.plot([minv, maxv], [minv, maxv], 'r--', lw=1.2, alpha=0.7)
+        axc.plot(
+            [minv, maxv],
+            [minv + move_limit_sec, maxv + move_limit_sec],
+            color='0.4',
+            linestyle=':',
+            lw=1.2,
+        )
+        axc.plot(
+            [minv, maxv],
+            [minv - move_limit_sec, maxv - move_limit_sec],
+            color='0.4',
+            linestyle=':',
+            lw=1.2,
+        )
 
         axc.set_title(comp_titles_ec[j], fontsize=12, fontweight='bold')
         axc.grid(alpha=0.3)
         axc.set_xlabel('Calculated shift (s)', fontsize=10)
         if j == 0:
             axc.set_ylabel('Estimated shift (s)', fontsize=10)
+        axc.legend(loc='upper left', fontsize=8)
 
         fig_ec.suptitle(
             f'Event {eve_id} - Estimated vs Calculated shifts ({align_phase})',
@@ -1718,4 +1898,6 @@ if process_as_three_comp and len(all_component_data) == 3:
         # plt.show()
 
     # ===================== Show all figures together at the end =====================
+    report_timing_once()
+    print("\a\a\a")
     plt.show()
