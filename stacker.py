@@ -75,7 +75,7 @@ def plot_stacks(
 
     tmin = None
     tmax = None
-    for tr in traces.values():
+    for tr in traces.values(): # find overall time range across all traces
         t_start = tr.stats.starttime
         t_end = tr.stats.endtime
         if tmin is None or t_start < tmin:
@@ -83,7 +83,7 @@ def plot_stacks(
         if tmax is None or t_end > tmax:
             tmax = t_end
 
-    if show_original:
+    if show_original: # plot original traces with event lines
         fig, axes = plt.subplots(len(plot_components), 1, figsize=(12, 6), sharex=True)
         if len(plot_components) == 1:
             axes = [axes]
@@ -93,8 +93,9 @@ def plot_stacks(
             origin_dt = origin_dt.replace(tzinfo=timezone.utc)
 
         event_times = []
-        for _, row in catalog.iterrows():
-            if str(row.get("skip", "0")) == "1":
+        for _, row in catalog.iterrows(): # gather event times for lines, skipping those marked with skip=1 or 2
+            # if str(row.get("skip", "0")) == "1":
+            if str(row.get("skip", "0")) in ("1", "2"):
                 continue
             try:
                 evt = UTCDateTime(str(row[ORIGIN_COL])).datetime
@@ -228,7 +229,7 @@ def plot_stacks(
         processed_by_comp = {comp: [] for comp in comp_order}
         processed_pre_mask = {comp: [] for comp in comp_order}
 
-        for comp, ax in zip(comp_order, axes_seg):
+        for comp, ax in zip(comp_order, axes_seg): # loop through components in specified order
             tr_c = traces.get(comp)
             if tr_c is None:
                 ax.set_axis_off()
@@ -239,7 +240,7 @@ def plot_stacks(
             segment_times = []
             segment_mags = []
             for _, row in catalog.iterrows():
-                if str(row.get("skip", "0")) == "1":
+                if str(row.get("skip", "0")) in ("1", "2"):
                     continue
                 try:
                     evt = UTCDateTime(str(row[ORIGIN_COL]))
@@ -416,7 +417,7 @@ def plot_stacks(
                     continue
 
                 for _, row in catalog.iterrows():
-                    if str(row.get("skip", "0")) == "1":
+                    if str(row.get("skip", "0")) in ("1", "2"):
                         continue
                     try:
                         evt = UTCDateTime(str(row[ORIGIN_COL]))

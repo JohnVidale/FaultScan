@@ -1,0 +1,145 @@
+time,latitude,longitude,depth_km,magnitude,magType,place,event_id,url,distance_km,type
+2025-01-01T23:36:54.650000+00:00,33.3891667,-116.4411667,11.83,2.0,ml,"16 km NNW of Borrego Springs, CA",ci40831847,https://earthquake.usgs.gov/earthquakes/eventpage/ci40831847,24.500220564333038,earthquake
+2025-01-02T05:27:12.090000+00:00,33.3081667,-116.2208333,5.41,2.14,ml,"16 km ENE of Borrego Springs, CA",ci40832031,https://earthquake.usgs.gov/earthquakes/eventpage/ci40832031,39.90446136886027,earthquake
+2025-01-09T23:05:01.380000+00:00,33.4821667,-116.4531667,12.9,2.02,ml,"22 km ESE of Anza, CA",ci40836791,https://earthquake.usgs.gov/earthquakes/eventpage/ci40836791,14.12649973278002,earthquake
+2025-01-11T15:55:54.460000+00:00,33.7626667,-115.9506667,1.17,2.0,ml,"22 km NE of Thermal, CA",ci40837959,https://earthquake.usgs.gov/earthquakes/eventpage/ci40837959,49.685449998431075,earthquake
+2025-01-12T17:20:05.900000+00:00,33.7635,-115.9498333,1.97,2.09,ml,"22 km NE of Thermal, CA",ci40838375,https://earthquake.usgs.gov/earthquakes/eventpage/ci40838375,49.7895168382553,earthquake
+2025-01-12T17:20:47.080000+00:00,33.7646667,-115.952,1.25,2.19,ml,"22 km NE of Thermal, CA",ci40838383,https://earthquake.usgs.gov/earthquakes/eventpage/ci40838383,49.64610043555955,earthquake
+2025-01-14T13:10:17.130000+00:00,33.2441667,-116.288,11.78,2.77,ml,"8 km E of Borrego Springs, CA",ci40839295,https://earthquake.usgs.gov/earthquakes/eventpage/ci40839295,43.447979958322065,earthquake
+2025-01-16T05:12:17.060000+00:00,33.7861667,-116.0608333,5.18,2.38,ml,"16 km NE of Coachella, CA",ci40840711,https://earthquake.usgs.gov/earthquakes/eventpage/ci40840711,41.435628249055824,earthquake
+2025-01-21T07:55:23.730000+00:00,33.6826667,-116.8023333,16.61,2.71,ml,"10 km SW of Idyllwild, CA",ci40844255,https://earthquake.usgs.gov/earthquakes/eventpage/ci40844255,33.173295186893284,earthquake
+2025-01-23T12:34:35.640000+00:00,33.5563333,-116.6631667,11.72,2.02,ml,"1 km E of Anza, CA",ci41034048,https://earthquake.usgs.gov/earthquakes/eventpage/ci41034048,20.15968746283992,earthquake
+2025-01-24T04:58:38.810000+00:00,33.7858333,-116.0628333,4.89,2.82,ml,"16 km NE of Coachella, CA",ci41034888,https://earthquake.usgs.gov/earthquakes/eventpage/ci41034888,41.2552941136836,earthquake
+2025-01-25T15:01:59.460000+00:00,33.9515,-116.3786667,8.29,2.81,ml,"11 km E of Desert Hot Springs, CA",ci40850991,https://earthquake.usgs.gov/earthquakes/eventpage/ci40850991,38.710375818861,earthquake
+2025-01-27T02:43:50.090000+00:00,33.9118333,-116.2105,7.68,2.91,ml,"20 km ENE of Thousand Palms, CA",ci40852279,https://earthquake.usgs.gov/earthquakes/eventpage/ci40852279,40.53744908914744,earthquake
+2025-01-27T04:01:37.880000+00:00,33.9141667,-116.213,7.91,2.22,ml,"19 km ENE of Thousand Palms, CA",ci40852335,https://earthquake.usgs.gov/earthquakes/eventpage/ci40852335,40.625202571487605,earthquake
+2025-01-27T16:29:32.860000+00:00,33.4163333,-116.9235,7.07,2.57,ml,"6 km WSW of Aguanga, CA",ci40852607,https://earthquake.usgs.gov/earthquakes/eventpage/ci40852607,48.440653396972124,earthquake
+2025-01-29T09:07:52.290000+00:00,33.4708333,-116.8958333,13.4,2.04,ml,"4 km NW of Aguanga, CA",ci40172042,https://earthquake.usgs.gov/earthquakes/eventpage/ci40172042,43.657797531981686,earthquake
+2025-02-01T09:06:25.660000+00:00,33.6596667,-116.7385,13.55,2.26,ml,"9 km SSW of Idyllwild, CA",ci40177370,https://earthquake.usgs.gov/earthquakes/eventpage/ci40177370,26.839548926494086,earthquake
+2025-02-01T11:19:25.350000+00:00,33.2601667,-116.4441667,1.97,2.02,ml,"6 km W of Borrego Springs, CA",ci40177482,https://earthquake.usgs.gov/earthquakes/eventpage/ci40177482,38.823802533391515,earthquake
+2025-02-07T02:02:59.320000+00:00,33.3648333,-116.3161667,11.79,2.32,ml,"13 km NNE of Borrego Springs, CA",ci40181210,https://earthquake.usgs.gov/earthquakes/eventpage/ci40181210,30.06835198776018,earthquake
+2025-02-11T13:31:42.980000+00:00,33.4555,-116.624,9.96,2.23,ml,"12 km SSE of Anza, CA",ci40184194,https://earthquake.usgs.gov/earthquakes/eventpage/ci40184194,23.1833466099784,earthquake
+2025-02-15T22:16:58.200000+00:00,33.6446667,-116.7413333,13.15,3.14,ml,"11 km S of Idyllwild, CA",ci40186482,https://earthquake.usgs.gov/earthquakes/eventpage/ci40186482,26.802688617214514,earthquake
+2025-02-23T14:37:18.350000+00:00,33.6175,-116.6913333,13.53,2.07,ml,"7 km NNW of Anza, CA",ci40192266,https://earthquake.usgs.gov/earthquakes/eventpage/ci40192266,21.904478629523965,earthquake
+2025-02-23T22:24:02.830000+00:00,33.3693333,-116.8921667,5.76,2.19,ml,"3 km WNW of Palomar Observatory, CA",ci40192522,https://earthquake.usgs.gov/earthquakes/eventpage/ci40192522,48.52782351543328,earthquake
+2025-02-23T22:25:33.340000+00:00,33.3681667,-116.891,5.72,2.41,ml,"3 km WNW of Palomar Observatory, CA",ci40192530,https://earthquake.usgs.gov/earthquakes/eventpage/ci40192530,48.50925073115619,earthquake
+2025-02-26T01:20:01.340000+00:00,33.6786667,-116.7848333,17.79,2.02,ml,"9 km SW of Idyllwild, CA",ci40194490,https://earthquake.usgs.gov/earthquakes/eventpage/ci40194490,31.49442908215492,earthquake
+2025-02-26T08:11:33.490000+00:00,33.8908333,-116.569,11.42,2.04,ml,"2 km WSW of Garnet, CA",ci40194642,https://earthquake.usgs.gov/earthquakes/eventpage/ci40194642,33.042333449567685,earthquake
+2025-03-01T17:08:17.250000+00:00,33.9383333,-116.7226667,17.0,2.12,ml,"6 km ENE of Cabazon, CA",ci41069440,https://earthquake.usgs.gov/earthquakes/eventpage/ci41069440,44.175724153334656,earthquake
+2025-03-02T11:08:32.660000+00:00,33.9435,-116.3606667,8.09,2.28,ml,"13 km E of Desert Hot Springs, CA",ci41069808,https://earthquake.usgs.gov/earthquakes/eventpage/ci41069808,38.181346486894064,earthquake
+2025-03-09T16:49:51.700000+00:00,33.3673333,-116.8928333,4.92,2.47,ml,"3 km WNW of Palomar Observatory, CA",ci41075424,https://earthquake.usgs.gov/earthquakes/eventpage/ci41075424,48.70232366908743,earthquake
+2025-03-10T04:16:16.760000+00:00,33.4698333,-116.8978333,13.44,2.4,ml,"4 km NW of Aguanga, CA",ci41075976,https://earthquake.usgs.gov/earthquakes/eventpage/ci41075976,43.87069288729166,earthquake
+2025-03-10T12:04:55.910000+00:00,33.5015,-116.4615,7.57,2.62,ml,"20 km ESE of Anza, CA",ci41076168,https://earthquake.usgs.gov/earthquakes/eventpage/ci41076168,11.99084746548986,earthquake
+2025-03-11T08:36:16.360000+00:00,33.5023333,-116.4593333,6.5,2.36,ml,"21 km ESE of Anza, CA",ci41077256,https://earthquake.usgs.gov/earthquakes/eventpage/ci41077256,11.889833619956914,earthquake
+2025-03-12T05:16:38.580000+00:00,33.2756667,-116.128,5.25,2.09,ml,"15 km N of Ocotillo Wells, CA",ci41077944,https://earthquake.usgs.gov/earthquakes/eventpage/ci41077944,47.91688909536524,earthquake
+2025-03-15T10:55:20.800000+00:00,33.2748333,-116.1308333,7.95,2.79,ml,"15 km N of Ocotillo Wells, CA",ci41080024,https://earthquake.usgs.gov/earthquakes/eventpage/ci41080024,47.82296410838035,earthquake
+2025-03-17T09:17:24.570000+00:00,33.4966667,-116.448,6.88,2.58,ml,"22 km ESE of Anza, CA",ci41081624,https://earthquake.usgs.gov/earthquakes/eventpage/ci41081624,12.529951296718082,earthquake
+2025-03-18T22:43:11.080000+00:00,33.277,-116.1316667,3.43,2.49,ml,"15 km N of Ocotillo Wells, CA",ci41082928,https://earthquake.usgs.gov/earthquakes/eventpage/ci41082928,47.586873637628806,earthquake
+2025-03-20T08:39:05.760000+00:00,33.3011667,-116.267,10.86,3.71944208463526,mw,"11 km ENE of Borrego Springs, CA",ci40904495,https://earthquake.usgs.gov/earthquakes/eventpage/ci40904495,38.43665247662526,earthquake
+2025-03-20T10:05:06.300000+00:00,33.3041667,-116.2671667,10.46,2.96,ml,"11 km ENE of Borrego Springs, CA",ci40904647,https://earthquake.usgs.gov/earthquakes/eventpage/ci40904647,38.13248042373324,earthquake
+2025-03-20T23:29:48.020000+00:00,33.2946667,-116.2803333,10.47,2.53,ml,"10 km ENE of Borrego Springs, CA",ci40905655,https://earthquake.usgs.gov/earthquakes/eventpage/ci40905655,38.54624402251589,earthquake
+2025-03-21T02:15:23.280000+00:00,33.7863333,-116.0771667,1.61,2.03,ml,"15 km ENE of Indio, CA",ci40905767,https://earthquake.usgs.gov/earthquakes/eventpage/ci40905767,40.12134636558319,earthquake
+2025-03-22T09:56:07.400000+00:00,33.7611667,-116.069,8.44,2.98,ml,"13 km NE of Coachella, CA",ci40907031,https://earthquake.usgs.gov/earthquakes/eventpage/ci40907031,39.510479792252696,earthquake
+2025-03-22T12:08:48.870000+00:00,33.2931667,-116.2086667,3.4,2.3,ml,"16 km ENE of Borrego Springs, CA",ci40907079,https://earthquake.usgs.gov/earthquakes/eventpage/ci40907079,41.91910010924418,earthquake
+2025-03-23T17:58:16.210000+00:00,33.7883333,-116.0763333,2.0,2.01,ml,"15 km ENE of Indio, CA",ci40908007,https://earthquake.usgs.gov/earthquakes/eventpage/ci40908007,40.29763751516775,earthquake
+2025-03-23T22:09:56.940000+00:00,33.2801667,-116.1408333,4.93,2.4,ml,"15 km N of Ocotillo Wells, CA",ci40908271,https://earthquake.usgs.gov/earthquakes/eventpage/ci40908271,46.77906890078446,earthquake
+2025-03-24T00:29:15.870000+00:00,33.2968333,-116.2101667,2.56,2.02,ml,"16 km ENE of Borrego Springs, CA",ci40908383,https://earthquake.usgs.gov/earthquakes/eventpage/ci40908383,41.50131495211487,earthquake
+2025-03-30T23:08:46.400000+00:00,33.5075,-116.5756667,6.47,2.36,ml,"10 km ESE of Anza, CA",ci40913271,https://earthquake.usgs.gov/earthquakes/eventpage/ci40913271,15.902865395396828,earthquake
+2025-03-31T11:29:28.040000+00:00,33.6553333,-116.7791667,14.57,2.09,ml,"11 km SSW of Idyllwild, CA",ci40913527,https://earthquake.usgs.gov/earthquakes/eventpage/ci40913527,30.447260323831102,earthquake
+2025-04-07T23:29:09.910000+00:00,33.7616667,-116.0688333,8.23,2.71,ml,"13 km NE of Coachella, CA",ci40919063,https://earthquake.usgs.gov/earthquakes/eventpage/ci40919063,39.54813008418711,earthquake
+2025-04-10T13:38:19.770000+00:00,33.9003333,-116.2186667,7.33,3.24,ml,"18 km ENE of Thousand Palms, CA",ci40921055,https://earthquake.usgs.gov/earthquakes/eventpage/ci40921055,39.05590064519792,earthquake
+2025-04-11T06:56:58.510000+00:00,33.4906667,-116.499,13.53,2.15,ml,"18 km ESE of Anza, CA",ci40922271,https://earthquake.usgs.gov/earthquakes/eventpage/ci40922271,13.79662390826623,earthquake
+2025-04-14T17:12:30.290000+00:00,33.23,-116.3,10.74,3.54,ml,"8 km ESE of Borrego Springs, CA",ci40926063,https://earthquake.usgs.gov/earthquakes/eventpage/ci40926063,44.55159187364202,earthquake
+2025-04-17T10:13:09.420000+00:00,33.4633333,-116.57,11.42,2.48,ml,"14 km SE of Anza, CA",ci40931023,https://earthquake.usgs.gov/earthquakes/eventpage/ci40931023,19.40842634555533,earthquake
+2025-05-02T06:15:52.200000+00:00,33.4746667,-116.4658333,11.38,2.23,ml,"21 km ESE of Anza, CA",ci41142664,https://earthquake.usgs.gov/earthquakes/eventpage/ci41142664,14.993096172477863,earthquake
+2025-05-08T04:50:59.470000+00:00,33.2881667,-116.2566667,9.88,2.31,ml,"12 km ENE of Borrego Springs, CA",ci41147464,https://earthquake.usgs.gov/earthquakes/eventpage/ci41147464,40.16091563651474,earthquake
+2025-05-08T04:51:20.180000+00:00,33.29,-116.2555,9.95,2.31,ml,"12 km ENE of Borrego Springs, CA",ci41147472,https://earthquake.usgs.gov/earthquakes/eventpage/ci41147472,40.029673560299415,earthquake
+2025-05-10T20:04:12.780000+00:00,33.6246667,-116.6958333,14.28,2.08,ml,"8 km NNW of Anza, CA",ci41150304,https://earthquake.usgs.gov/earthquakes/eventpage/ci41150304,22.367027479391204,earthquake
+2025-05-10T22:50:32.960000+00:00,33.2696667,-116.4356667,4.18,2.14,ml,"6 km WNW of Borrego Springs, CA",ci41150456,https://earthquake.usgs.gov/earthquakes/eventpage/ci41150456,37.7970274290729,earthquake
+2025-05-12T10:26:57.680000+00:00,33.4888333,-116.4165,7.23,2.14,ml,"22 km SSW of La Quinta, CA",ci41151360,https://earthquake.usgs.gov/earthquakes/eventpage/ci41151360,13.851568734903038,earthquake
+2025-05-12T20:58:16.060000+00:00,33.2688333,-116.434,4.84,2.12,ml,"6 km WNW of Borrego Springs, CA",ci41151824,https://earthquake.usgs.gov/earthquakes/eventpage/ci41151824,37.897230589380165,earthquake
+2025-05-16T16:44:32.880000+00:00,33.675,-116.7211667,15.86,2.23,ml,"7 km S of Idyllwild, CA",ci41154408,https://earthquake.usgs.gov/earthquakes/eventpage/ci41154408,25.70282605117325,earthquake
+2025-05-21T17:49:35.580000+00:00,33.274,-116.212,10.7,2.1,ml,"15 km E of Borrego Springs, CA",ci40972151,https://earthquake.usgs.gov/earthquakes/eventpage/ci40972151,43.561624633450585,earthquake
+2025-05-24T04:53:26.970000+00:00,33.5023333,-116.4598333,7.72,2.04,ml,"21 km ESE of Anza, CA",ci40974287,https://earthquake.usgs.gov/earthquakes/eventpage/ci40974287,11.891488498660214,earthquake
+2025-05-25T13:00:18.480000+00:00,33.6796667,-116.8026667,16.18,2.57,ml,"10 km SW of Idyllwild, CA",ci40975983,https://earthquake.usgs.gov/earthquakes/eventpage/ci40975983,33.123257468085846,earthquake
+2025-05-31T22:08:30.670000+00:00,33.643,-116.8986667,16.7,2.02,ml,"12 km S of Valle Vista, CA",ci40982039,https://earthquake.usgs.gov/earthquakes/eventpage/ci40982039,41.250066801569595,earthquake
+2025-06-01T11:37:13.130000+00:00,33.381,-116.3188333,11.46,2.04,ml,"15 km NNE of Borrego Springs, CA",ci40982335,https://earthquake.usgs.gov/earthquakes/eventpage/ci40982335,28.34268337923348,earthquake
+2025-06-04T19:27:08.450000+00:00,33.6768333,-116.7641667,15.78,3.19,ml,"8 km SSW of Idyllwild, CA",ci41173792,https://earthquake.usgs.gov/earthquakes/eventpage/ci41173792,29.591306570485905,earthquake
+2025-06-09T20:39:35.660000+00:00,33.9355,-116.735,13.89,2.07,ml,"5 km ENE of Cabazon, CA",ci41180648,https://earthquake.usgs.gov/earthquakes/eventpage/ci41180648,44.567488282813414,earthquake
+2025-06-11T13:21:18.150000+00:00,33.8361667,-116.8723333,10.69,2.9,ml,"10 km NE of San Jacinto, CA",ci41182560,https://earthquake.usgs.gov/earthquakes/eventpage/ci41182560,46.115674055653244,earthquake
+2025-06-12T23:00:28.600000+00:00,33.9486667,-116.7371667,15.16,2.05,ml,"6 km NE of Cabazon, CA",ci40992687,https://earthquake.usgs.gov/earthquakes/eventpage/ci40992687,45.87970902045619,earthquake
+2025-06-20T22:04:36.950000+00:00,33.2843333,-116.2736667,3.63,2.33,ml,"10 km ENE of Borrego Springs, CA",ci40999975,https://earthquake.usgs.gov/earthquakes/eventpage/ci40999975,39.84931083004283,earthquake
+2025-06-20T22:04:50.390000+00:00,33.284,-116.2703333,4.79,2.0,ml,"10 km ENE of Borrego Springs, CA",ci37546285,https://earthquake.usgs.gov/earthquakes/eventpage/ci37546285,40.01437148226829,earthquake
+2025-06-21T15:21:00.760000+00:00,33.6305,-116.7108333,13.78,2.44,ml,"9 km NNW of Anza, CA",ci41000591,https://earthquake.usgs.gov/earthquakes/eventpage/ci41000591,23.807091731566057,earthquake
+2025-06-22T07:01:57+00:00,33.2865,-116.2523333,9.3,2.05,ml,"12 km ENE of Borrego Springs, CA",ci41000871,https://earthquake.usgs.gov/earthquakes/eventpage/ci41000871,40.51085773514368,earthquake
+2025-06-22T23:09:15.950000+00:00,33.4908333,-116.498,12.52,2.11,ml,"18 km ESE of Anza, CA",ci41001143,https://earthquake.usgs.gov/earthquakes/eventpage/ci41001143,13.751787915277921,earthquake
+2025-06-23T15:38:07.670000+00:00,33.489,-116.7921667,7.06,2.0,ml,"8 km NE of Aguanga, CA",ci41001855,https://earthquake.usgs.gov/earthquakes/eventpage/ci41001855,33.98430089848957,earthquake
+2025-06-28T12:07:16.680000+00:00,33.4578333,-116.5078333,12.16,2.05,ml,"19 km SE of Anza, CA",ci41007399,https://earthquake.usgs.gov/earthquakes/eventpage/ci41007399,17.529150814080563,earthquake
+2025-07-02T12:01:44.440000+00:00,33.5226667,-116.7376667,4.82,2.0,ml,"7 km WSW of Anza, CA",ci41012191,https://earthquake.usgs.gov/earthquakes/eventpage/ci41012191,27.90161452824404,earthquake
+2025-07-03T17:45:58.970000+00:00,33.8555,-116.1565,8.75,2.14,ml,"16 km NNE of Indio, CA",ci41013583,https://earthquake.usgs.gov/earthquakes/eventpage/ci41013583,38.8847276639734,earthquake
+2025-07-09T05:03:36.350000+00:00,33.367,-116.8751667,7.79,2.56,ml,"2 km NW of Palomar Observatory, CA",ci41017615,https://earthquake.usgs.gov/earthquakes/eventpage/ci41017615,47.36621635912211,earthquake
+2025-07-09T15:58:32.810000+00:00,33.6165,-116.685,13.7,2.01,ml,"7 km N of Anza, CA",ci41017959,https://earthquake.usgs.gov/earthquakes/eventpage/ci41017959,21.314134463025283,earthquake
+2025-07-11T00:16:46.150000+00:00,33.2601667,-116.4271667,5.29,3.7,ml,"5 km W of Borrego Springs, CA",ci41019143,https://earthquake.usgs.gov/earthquakes/eventpage/ci41019143,38.89662837403985,earthquake
+2025-07-11T00:17:48.720000+00:00,33.7853333,-116.082,1.87,3.01,ml,"14 km ENE of Indio, CA",ci41019151,https://earthquake.usgs.gov/earthquakes/eventpage/ci41019151,39.677576601680066,earthquake
+2025-07-11T17:49:19.110000+00:00,33.2625,-116.4261667,5.13,2.38,ml,"5 km W of Borrego Springs, CA",ci41020263,https://earthquake.usgs.gov/earthquakes/eventpage/ci41020263,38.64406457083934,earthquake
+2025-07-19T06:37:13.990000+00:00,33.7036667,-116.7695,16.47,2.42,ml,"6 km SW of Idyllwild, CA",ci41026127,https://earthquake.usgs.gov/earthquakes/eventpage/ci41026127,30.946167935898867,earthquake
+2025-07-28T18:28:45.460000+00:00,33.9623333,-116.7888333,10.78,3.04,ml,"5 km N of Cabazon, CA",ci41034687,https://earthquake.usgs.gov/earthquakes/eventpage/ci41034687,49.93693559335191,earthquake
+2025-07-28T18:29:19.590000+00:00,33.9618333,-116.7871667,11.18,3.12,ml,"5 km N of Cabazon, CA",ci41034695,https://earthquake.usgs.gov/earthquakes/eventpage/ci41034695,49.79819277737377,earthquake
+2025-08-05T08:16:32.450000+00:00,33.679,-116.7973333,17.58,2.16,ml,"10 km SW of Idyllwild, CA",ci41253424,https://earthquake.usgs.gov/earthquakes/eventpage/ci41253424,32.62617644479209,earthquake
+2025-08-09T20:08:44.420000+00:00,33.992,-116.6435,6.61,3.05,ml,"8 km SW of Morongo Valley, CA",ci41257504,https://earthquake.usgs.gov/earthquakes/eventpage/ci41257504,45.99117023246226,earthquake
+2025-08-13T03:25:05.150000+00:00,33.5276667,-116.7238333,5.38,2.09,ml,"6 km WSW of Anza, CA",ci41259616,https://earthquake.usgs.gov/earthquakes/eventpage/ci41259616,26.506242879358776,earthquake
+2025-08-15T03:57:24.290000+00:00,33.3748333,-116.2775,11.62,2.02,ml,"16 km NE of Borrego Springs, CA",ci41261152,https://earthquake.usgs.gov/earthquakes/eventpage/ci41261152,30.82332359186994,earthquake
+2025-08-15T16:09:15.750000+00:00,33.4626667,-116.4356667,12.35,2.06,ml,"24 km NNW of Borrego Springs, CA",ci41261488,https://earthquake.usgs.gov/earthquakes/eventpage/ci41261488,16.39201921474223,earthquake
+2025-08-15T16:43:29.010000+00:00,33.6763333,-116.7995,17.34,3.33,ml,"10 km SW of Idyllwild, CA",ci41261536,https://earthquake.usgs.gov/earthquakes/eventpage/ci41261536,32.75265034064306,earthquake
+2025-08-20T09:23:44.960000+00:00,33.9618333,-116.6763333,16.66,2.48,ml,"11 km ENE of Cabazon, CA",ci40403706,https://earthquake.usgs.gov/earthquakes/eventpage/ci40403706,44.22569061207143,earthquake
+2025-08-22T11:15:42.990000+00:00,33.2618333,-116.4283333,4.67,2.17,ml,"5 km W of Borrego Springs, CA",ci41271624,https://earthquake.usgs.gov/earthquakes/eventpage/ci41271624,38.70464841914993,earthquake
+2025-08-25T03:53:17.130000+00:00,33.7051667,-116.734,18.22,2.14,ml,"4 km SSW of Idyllwild, CA",ci41273832,https://earthquake.usgs.gov/earthquakes/eventpage/ci41273832,27.940891654944398,earthquake
+2025-08-27T16:48:05.700000+00:00,33.5056667,-116.462,6.11,2.02,ml,"20 km ESE of Anza, CA",ci41276648,https://earthquake.usgs.gov/earthquakes/eventpage/ci41276648,11.530652026362242,earthquake
+2025-08-29T22:57:29.140000+00:00,33.526,-116.7191667,2.45,2.0,ml,"5 km SW of Anza, CA",ci41278864,https://earthquake.usgs.gov/earthquakes/eventpage/ci41278864,26.165548970303757,earthquake
+2025-09-01T08:58:24.860000+00:00,33.8935,-116.8623333,16.65,2.39,ml,"4 km SSE of Banning, CA",ci41280568,https://earthquake.usgs.gov/earthquakes/eventpage/ci41280568,49.169087025789345,earthquake
+2025-09-01T15:59:29.370000+00:00,33.9096667,-116.2495,6.09,2.58,ml,"16 km NE of Thousand Palms, CA",ci41280792,https://earthquake.usgs.gov/earthquakes/eventpage/ci41280792,38.43381680945818,earthquake
+2025-09-04T17:39:05.730000+00:00,33.7746667,-116.0768333,2.28,2.17,ml,"14 km NE of Coachella, CA",ci41283344,https://earthquake.usgs.gov/earthquakes/eventpage/ci41283344,39.530065044962996,earthquake
+2025-09-05T19:01:14.990000+00:00,33.529,-116.7241667,4.87,2.21,ml,"6 km WSW of Anza, CA",ci41284192,https://earthquake.usgs.gov/earthquakes/eventpage/ci41284192,26.48480334110327,earthquake
+2025-09-05T21:08:32.880000+00:00,34.0075,-116.3236667,8.28,2.4,ml,"14 km S of Joshua Tree, CA",ci41284304,https://earthquake.usgs.gov/earthquakes/eventpage/ci41284304,45.92115887246864,earthquake
+2025-09-12T14:25:03.780000+00:00,33.1775,-116.5373333,15.3,2.16,ml,"12 km NNE of Julian, CA",ci41289880,https://earthquake.usgs.gov/earthquakes/eventpage/ci41289880,48.60766337339458,earthquake
+2025-09-15T03:57:20.160000+00:00,33.4828333,-116.8181667,6.33,2.09,ml,"6 km NE of Aguanga, CA",ci41291536,https://earthquake.usgs.gov/earthquakes/eventpage/ci41291536,36.4717531620848,earthquake
+2025-09-15T07:08:52.750000+00:00,33.639,-116.7293333,13.74,2.83,ml,"11 km NNW of Anza, CA",ci41291600,https://earthquake.usgs.gov/earthquakes/eventpage/ci41291600,25.61597041397726,earthquake
+2025-09-15T13:38:11.610000+00:00,33.8895,-116.412,3.57,2.21,ml,"8 km NNW of Thousand Palms, CA",ci41291784,https://earthquake.usgs.gov/earthquakes/eventpage/ci41291784,31.42050977600122,earthquake
+2025-09-21T02:22:34.390000+00:00,33.2633333,-116.6118333,17.57,2.49,ml,"3 km SE of Warner Springs, CA",ci40447274,https://earthquake.usgs.gov/earthquakes/eventpage/ci40447274,41.12001152533743,earthquake
+2025-09-25T14:19:18.570000+00:00,33.4548333,-116.538,10.51,2.63,ml,"17 km SE of Anza, CA",ci41097487,https://earthquake.usgs.gov/earthquakes/eventpage/ci41097487,18.810020900877753,earthquake
+2025-09-26T03:52:48.170000+00:00,33.5868333,-116.739,12.61,2.0,ml,"7 km WNW of Anza, CA",ci41098047,https://earthquake.usgs.gov/earthquakes/eventpage/ci41098047,26.421068348594222,earthquake
+2025-10-03T09:07:05.400000+00:00,33.2655,-116.6125,17.0,3.18,ml,"3 km SE of Warner Springs, CA",ci41102063,https://earthquake.usgs.gov/earthquakes/eventpage/ci41102063,40.91675808872574,earthquake
+2025-10-06T05:09:27.960000+00:00,33.161,-116.4256667,8.8,2.01,ml,"12 km SSW of Borrego Springs, CA",ci41103407,https://earthquake.usgs.gov/earthquakes/eventpage/ci41103407,49.91199509652711,earthquake
+2025-10-08T12:28:36.010000+00:00,34.0091667,-116.4056667,7.06,2.59,ml,"10 km ENE of Desert Hot Springs, CA",ci41105143,https://earthquake.usgs.gov/earthquakes/eventpage/ci41105143,44.70728032374289,earthquake
+2025-10-11T00:57:51.400000+00:00,33.2955,-116.3283333,10.73,2.25,ml,"6 km NE of Borrego Springs, CA",ci41106495,https://earthquake.usgs.gov/earthquakes/eventpage/ci41106495,36.808202268516595,earthquake
+2025-10-18T20:15:05.060000+00:00,33.263,-116.4313333,5.83,2.69,ml,"5 km W of Borrego Springs, CA",ci41110951,https://earthquake.usgs.gov/earthquakes/eventpage/ci41110951,38.558326284854,earthquake
+2025-10-27T15:46:22.040000+00:00,33.4508333,-116.6305,9.32,2.19,ml,"12 km SSE of Anza, CA",ci41320984,https://earthquake.usgs.gov/earthquakes/eventpage/ci41320984,23.973450861292235,earthquake
+2025-10-30T03:05:13.690000+00:00,33.3483333,-116.3741667,13.91,2.72,ml,"10 km N of Borrego Springs, CA",ci41322360,https://earthquake.usgs.gov/earthquakes/eventpage/ci41322360,29.960250952160287,earthquake
+2025-11-01T17:22:41.300000+00:00,33.3698333,-116.8891667,5.14,2.03,ml,"3 km WNW of Palomar Observatory, CA",ci41323960,https://earthquake.usgs.gov/earthquakes/eventpage/ci41323960,48.26487012878839,earthquake
+2025-11-07T01:18:07.270000+00:00,33.6286667,-116.7058333,14.01,2.03,ml,"9 km NNW of Anza, CA",ci40482114,https://earthquake.usgs.gov/earthquakes/eventpage/ci40482114,23.32690426829457,earthquake
+2025-11-12T20:21:34.870000+00:00,33.6795,-116.0173333,10.83,2.52,ml,"12 km ENE of Thermal, CA",ci40484482,https://earthquake.usgs.gov/earthquakes/eventpage/ci40484482,41.26160307895549,earthquake
+2025-11-13T09:34:28.690000+00:00,33.7835,-116.9321667,14.29,2.54,ml,"2 km E of San Jacinto, CA",ci40484674,https://earthquake.usgs.gov/earthquakes/eventpage/ci40484674,48.211380477314215,earthquake
+2025-11-13T13:32:12.680000+00:00,33.8878333,-116.228,8.19,2.62,ml,"17 km ENE of Thousand Palms, CA",ci40484722,https://earthquake.usgs.gov/earthquakes/eventpage/ci40484722,37.42201281328838,earthquake
+2025-11-13T19:26:20.310000+00:00,33.4588333,-116.4468333,3.23,2.09,ml,"24 km NNW of Borrego Springs, CA",ci40484906,https://earthquake.usgs.gov/earthquakes/eventpage/ci40484906,16.737162871641704,earthquake
+2025-11-15T12:59:58.330000+00:00,33.7783333,-116.152,6.01,2.22,ml,"9 km NE of Indio, CA",ci40485354,https://earthquake.usgs.gov/earthquakes/eventpage/ci40485354,33.75654913560033,earthquake
+2025-11-16T08:22:23.150000+00:00,33.4573333,-116.4531667,2.87,2.52,ml,"23 km ESE of Anza, CA",ci40485522,https://earthquake.usgs.gov/earthquakes/eventpage/ci40485522,16.887684815650996,earthquake
+2025-11-17T00:10:12.830000+00:00,33.4561667,-116.4508333,3.42,2.98,ml,"23 km NNW of Borrego Springs, CA",ci40485794,https://earthquake.usgs.gov/earthquakes/eventpage/ci40485794,17.020932175248458,earthquake
+2025-11-17T00:36:22.260000+00:00,33.4371667,-116.4585,9.99,2.38,ml,"22 km NNW of Borrego Springs, CA",ci40485850,https://earthquake.usgs.gov/earthquakes/eventpage/ci40485850,19.13200783088096,earthquake
+2025-11-17T01:25:03+00:00,33.4546667,-116.4515,3.24,2.11,ml,"23 km NNW of Borrego Springs, CA",ci40485898,https://earthquake.usgs.gov/earthquakes/eventpage/ci40485898,17.186404816780215,earthquake
+2025-11-28T01:36:44.320000+00:00,33.675,-116.7965,17.5,3.49613296903951,mw,"10 km SW of Idyllwild, CA",ci41128295,https://earthquake.usgs.gov/earthquakes/eventpage/ci41128295,32.44879732543424,earthquake
+2025-11-28T01:37:06+00:00,33.6758333333333,-116.793166666667,17.14,3.48,ml,"10 km SW of Idyllwild, CA",ci41128303,https://earthquake.usgs.gov/earthquakes/eventpage/ci41128303,32.16931610195772,earthquake
+2025-11-28T01:38:27.330000+00:00,33.6748333333333,-116.794166666667,17.42,2.01,ml,"10 km SW of Idyllwild, CA",ci41128311,https://earthquake.usgs.gov/earthquakes/eventpage/ci41128311,32.23422549781402,earthquake
+2025-11-28T06:14:00.750000+00:00,33.6783333333333,-116.7975,17.1,2.18,ml,"10 km SW of Idyllwild, CA",ci41128567,https://earthquake.usgs.gov/earthquakes/eventpage/ci41128567,32.62373713961346,earthquake
+2025-11-28T12:29:49.010000+00:00,33.6755,-116.797166666667,17.47,2.58,ml,"10 km SW of Idyllwild, CA",ci41128719,https://earthquake.usgs.gov/earthquakes/eventpage/ci41128719,32.52139379908733,earthquake
+2025-11-29T12:48:21.560000+00:00,33.9241666666667,-116.815,6.56,2.17,ml,"3 km WNW of Cabazon, CA",ci41129351,https://earthquake.usgs.gov/earthquakes/eventpage/ci41129351,48.31121048028104,earthquake
+2025-12-05T03:10:00.490000+00:00,33.3845,-116.384833333333,3.15,2.17,ml,"14 km N of Borrego Springs, CA",ci41132919,https://earthquake.usgs.gov/earthquakes/eventpage/ci41132919,25.818785206938816,earthquake
+2025-12-07T11:43:38.210000+00:00,33.7173333333333,-116.841,16.6,2.04,ml,"6 km SE of Valle Vista, CA",ci41134623,https://earthquake.usgs.gov/earthquakes/eventpage/ci41134623,37.693004099683975,earthquake
+2025-12-09T08:01:17.400000+00:00,33.2353333333333,-116.407,1.88,3.17,ml,"4 km SW of Borrego Springs, CA",ci41135767,https://earthquake.usgs.gov/earthquakes/eventpage/ci41135767,41.81012929996232,earthquake
+2025-12-09T19:17:43.330000+00:00,33.2663333333333,-116.3435,11.66,2.11,ml,"3 km ENE of Borrego Springs, CA",ci41136159,https://earthquake.usgs.gov/earthquakes/eventpage/ci41136159,39.50397892383655,earthquake
+2025-12-11T07:59:16.840000+00:00,33.2366666666667,-116.403833333333,1.93,2.05,ml,"3 km SW of Borrego Springs, CA",ci41137239,https://earthquake.usgs.gov/earthquakes/eventpage/ci41137239,41.6951594709739,earthquake
+2025-12-19T09:49:03.650000+00:00,33.7025,-116.7695,15.69,2.01,ml,"6 km SW of Idyllwild, CA",ci41142679,https://earthquake.usgs.gov/earthquakes/eventpage/ci41142679,30.90255949985897,earthquake
+2025-12-19T14:52:43.930000+00:00,33.4781666666667,-116.4845,13.97,2.25,ml,"20 km ESE of Anza, CA",ci41142807,https://earthquake.usgs.gov/earthquakes/eventpage/ci41142807,14.824545763751775,earthquake
+2025-12-19T14:52:54.010000+00:00,33.4741666666667,-116.490166666667,12.99,3.23,ml,"19 km ESE of Anza, CA",ci41142815,https://earthquake.usgs.gov/earthquakes/eventpage/ci41142815,15.364700431992963,earthquake
+2025-12-27T00:27:18.310000+00:00,33.6766666666667,-116.795833333333,17.42,2.02,ml,"10 km SW of Idyllwild, CA",ci41147575,https://earthquake.usgs.gov/earthquakes/eventpage/ci41147575,32.4307457257253,earthquake
+2025-12-28T20:39:22.560000+00:00,33.234,-116.741166666667,10.26,2.02,ml,"2 km ESE of Lake Henshaw, CA",ci41148351,https://earthquake.usgs.gov/earthquakes/eventpage/ci41148351,49.456448420242154,earthquake
+2025-12-30T05:23:50.360000+00:00,33.9503333333333,-116.749833333333,12.62,2.1,ml,"5 km NE of Cabazon, CA",ci41149207,https://earthquake.usgs.gov/earthquakes/eventpage/ci41149207,46.70535052967527,earthquake

@@ -13,44 +13,40 @@ from obspy.signal.rotate import rotate_ne_rt
 from scipy.signal import hilbert
 from scipy.signal.windows import gaussian
 
-min_freq, max_freq            = 7.0, 20.0 # Bandpass filter (Hz)
-# start_time, end_time          = -10.0, 20 # Plotting time window (seconds since origin)
-# start_time, end_time          = -1990.0, 3690.0 # Plotting time window (seconds since origin)
-start_time, end_time          = -1990.0, 15000 # Plotting time window (seconds since origin)
-win_pre, win_post             = 0.5,  0.5 # Correlation window parameters (seconds)
-r_window_min                  = 0.6       # Minimum correlation coefficient for trace selection
-move_limit_sec                = 0.05      # Maximum allowed shift (seconds) searched in compute_lag
+from config import Config
+from helpers import (
+    compute_lag,
+    shift_left_zeropad,
+    set_figure_title,
+    report_timing_once,
+    add_catalog_event_lines,
+)
 
-# Run modes
-all_channels = True  # If True to process all channels
-component   = "Z"       # Component selection: 'Z', 'R', or 'T'
-align_phase = "P"       # Alignment phase 'P' or 'S'
-verbose     = False     # If True, print detailed processing info
+from plotting_threecomp import plot_three_component_outputs
 
-# Paths
-path_prefix = "/Users/vidale/Documents/Research/Mingze_SJF/"
-info_root = Path(path_prefix + "20220930_events_cut/event_sta_info")
+cfg = Config()
 
-# sps_rate = "down50"  # Subdirectory name indicating the sampling rate of the data (e.g., "down50", "down100", etc.)
-# data_path = Path(path_prefix + "20220930_events_cut/07_1hour_20220930")
+min_freq, max_freq = cfg.min_freq, cfg.max_freq
+start_time, end_time = cfg.start_time, cfg.end_time
+win_pre, win_post = cfg.win_pre, cfg.win_post
+r_window_min = cfg.r_window_min
+move_limit_sec = cfg.move_limit_sec
 
-sps_rate = "down100"
-data_path = Path(path_prefix + "20220930_events_cut/20220930_" + sps_rate)
+all_channels = cfg.all_channels
+component = cfg.component
+align_phase = cfg.align_phase
+verbose = cfg.verbose
 
-event       = "CI_40353544" # Single run selection (used when the corresponding "all_*" is False)
-# event       = "CI_40353664" # Single run selection (used when the corresponding "all_*" is False)
-events = [event]        # Allows for future modification to process multiple events
+path_prefix = cfg.path_prefix
+info_root = cfg.info_root
+sps_rate = cfg.sps_rate
+data_path = cfg.data_path
 
-# plotting options (user-facing)
-show_individual_seismograms = False  # Plot individual seismograms (20 traces/plot, 5 panels/figure)
-show_record_section_plot = False  # Show aligned record sections (single + 3-comp)
+event = cfg.event
+events = cfg.events
 
-
-# Timing (cpu and wall)
-_start_cpu_time = time.process_time()
-_start_wall_time = time.perf_counter()
-_timing_reported = False
-
+show_individual_seismograms = cfg.show_individual_seismograms
+show_record_section_plot = cfg.show_record_section_plot
 
 catalog_local_file = info_root / "catalog_local_hand.xlsx"
 catalog_local = None
@@ -67,96 +63,9 @@ except Exception as e:
 model = TauPyModel(model="iasp91")
 
 # ===================== Helper functions =====================
-def compute_lag(ref: np.ndarray, d: np.ndarray, win_start: int, win_end: int) -> int:
-    """Compute integer lag (samples) by maximizing correlation within a short window.
-
-    This matches the original implementation:
-      - ref_window = ref[win_start:win_end]
-    - d_window   = d[win_start-move_limit_samples : win_end+move_limit_samples]
-      - corr = np.correlate(d_window, ref_window, mode='valid')
-    - lag = argmax(corr) - move_limit_samples
-
-    Returns:
-        Best lag (integer samples). Positive lag advances the target waveform.
-    """
-    ref_window = ref[win_start:win_end]
-    d_window = d[win_start - move_limit_samples : win_end + move_limit_samples]
-    corr = np.correlate(d_window, ref_window, mode="valid")
-    return int(np.argmax(corr) - move_limit_samples)
-
-
-def shift_left_zeropad(x: np.ndarray, n: int) -> np.ndarray:
-    """Shift 1D array left by n samples with zero padding (no wrap-around).
-
-    Equivalent to np.roll(x, -n) but WITHOUT circular wrap.
-      - n > 0: advance in time
-      - n < 0: delay
-    """
-    x = np.asarray(x)
-    y = np.zeros_like(x)
-
-    if n == 0:
-        y[:] = x
-        return y
-
-    if n > 0:
-        if n >= x.size:
-            return y
-        y[:-n] = x[n:]
-        return y
-
-    # n < 0
-    n = -n
-    if n >= x.size:
-        return y
-    y[n:] = x[:-n]
-    return y
-
-
-def set_figure_title(fig, title: str) -> None:
-    """Set a descriptive window title if the backend supports it."""
-    try:
-        fig.canvas.manager.set_window_title(title)
-    except Exception:
-        pass
-
-
-def report_timing_once() -> None:
-    """Report cpu and wall time before showing plots."""
-    global _timing_reported
-    if _timing_reported:
-        return
-    cpu_sec = time.process_time() - _start_cpu_time
-    wall_sec = time.perf_counter() - _start_wall_time
-    print(f"\033[31mTiming: cpu={cpu_sec:.2f}s  wall={wall_sec:.2f}s\033[0m")
-    _timing_reported = True
-
-
-def add_catalog_event_lines(ax, origin_time, catalog_df, tmin, tmax) -> None:
-    """Draw vertical lines for each catalog event time on a time-since-origin axis."""
-    if origin_time is None or catalog_df is None:
-        return
-    if "origin_time" not in catalog_df.columns:
-        print("[WARN] Catalog missing 'origin_time' column; no event lines drawn.")
-        return
-
-    color_map = {0: "red", 1: "black", 2: "green"}
-    for _, row in catalog_df.iterrows():
-        try:
-            evt_time = UTCDateTime(str(row["origin_time"]))
-        except Exception:
-            continue
-        dt = float(evt_time - origin_time)
-        if dt < tmin or dt > tmax:
-            continue
-        skip_val = row.get("skip", 0)
-        try:
-            skip_int = int(skip_val)
-        except Exception:
-            skip_int = 0
-        color = color_map.get(skip_int, "red")
-        ax.axvline(x=dt, color=color, lw=1.1, alpha=0.8, zorder=6)
-
+# Use helper functions imported from helpers.py:
+# compute_lag, shift_left_zeropad, set_figure_title, report_timing_once, add_catalog_event_lines
+# (Do not redefine them here.)
 # ===================== Channel / component selection =====================
 # User-facing components: Z, R, T
 if all_channels:
@@ -516,10 +425,12 @@ for idx, channel in enumerate(channels):
                 expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
                 rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
                 lag1 = expected_shift_samples + compute_lag(
-                    ref, rolled_expected, win_start, win_end
+                    ref, rolled_expected, win_start, win_end, move_limit_samples
                 )
             else:
-                lag1 = lag0 + compute_lag(ref, rolled, win_start, win_end)
+                lag1 = lag0 + compute_lag(
+                    ref, rolled, win_start, win_end, move_limit_samples
+                )
 
             aligned_stack += shift_left_zeropad(d, lag1)
 
@@ -548,10 +459,12 @@ for idx, channel in enumerate(channels):
                 expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
                 rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
                 lag2 = expected_shift_samples + compute_lag(
-                    aligned_stack, rolled_expected, win_start, win_end
+                    aligned_stack, rolled_expected, win_start, win_end, move_limit_samples
                 )
             else:
-                lag2 = lag0 + compute_lag(aligned_stack, rolled, win_start, win_end)
+                lag2 = lag0 + compute_lag(
+                    aligned_stack, rolled, win_start, win_end, move_limit_samples
+                )
 
             aligned_data = shift_left_zeropad(d, lag2)
             ref_window = aligned_stack[win_start:win_end]
@@ -605,10 +518,12 @@ for idx, channel in enumerate(channels):
                 if station_id in calc_shifts:
                     expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
                     x_expected = shift_left_zeropad(x, expected_shift_samples)
-                    lag_delta = compute_lag(ref, x_expected, win_start, win_end)
+                    lag_delta = compute_lag(
+                        ref, x_expected, win_start, win_end, move_limit_samples
+                    )
                     lag3 = expected_shift_samples + lag_delta
                 else:
-                    lag3 = compute_lag(ref, x, win_start, win_end)
+                    lag3 = compute_lag(ref, x, win_start, win_end, move_limit_samples)
                 y = shift_left_zeropad(x, lag3)
 
             # Store shift (in samples and seconds)
@@ -1002,6 +917,7 @@ for idx, channel in enumerate(channels):
                 try:
                     all_rows = selected_rows + rejected_rows
                     all_rows.sort(key=lambda t: int(t[1]))
+                    pass_set = set(pass_window_ids)
 
                     n_traces = len(all_rows)
                     if n_traces > 0:
@@ -1048,7 +964,7 @@ for idx, channel in enumerate(channels):
 
                                 for idx_in_subset, (_, station_id, y) in enumerate(subset):
                                     i = (len(subset) - 1) - idx_in_subset
-                                    passed_win = station_id in pass_window_ids
+                                    passed_win = station_id in pass_set
                                     trace_color = 'k' if passed_win else 'red'
                                     axp.plot(
                                         t_abs[mask],
@@ -1381,7 +1297,7 @@ if process_as_three_comp and len(all_component_data) == 3:
 
                     ticks = ax_env.get_xticks()
                     labels = [
-                        (origin_dt_utc + timedelta(seconds=float(t))).astimezone(timezone.utc).strftime('%H:%M:%S')
+                        (origin_dt_utc + timedelta(seconds=float(t))).astimezone(utc_tz).strftime('%H:%M:%S')
                         for t in ticks
                     ]
                     ax_time.set_xticks(ticks)
@@ -1517,6 +1433,7 @@ if process_as_three_comp and len(all_component_data) == 3:
                 data = all_component_data[comp_name]
                 all_rows = data.get('all_rows', [])
                 all_rows = sorted(all_rows, key=lambda t: int(t[1]))
+                pass_set = set(data.get('pass_window_ids', []))
                 t_abs = data['t_abs']
                 mask = data['mask']
                 sample_rate = data['sample_rate']
@@ -1572,7 +1489,7 @@ if process_as_three_comp and len(all_component_data) == 3:
 
                         for idx_in_subset, (_, station_id, y) in enumerate(subset):
                             i = (len(subset) - 1) - idx_in_subset
-                            passed_win = station_id in pass_window_ids
+                            passed_win = station_id in pass_set
                             trace_color = 'k' if passed_win else 'red'
                             axp.plot(
                                 t_abs[mask],
