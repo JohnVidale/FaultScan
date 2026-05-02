@@ -26,6 +26,7 @@ PFO_LAT = 33.6092
 PFO_LON = -116.4550
 EARTH_RADIUS_KM = 6371.0088
 USGS_EVENT_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query"
+OUTPUT_DIR = Path("/Users/vidale/Documents/Research/Mingze_SJF/output")
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -296,7 +297,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lat", type=float, default=PFO_LAT)
     parser.add_argument("--lon", type=float, default=PFO_LON)
     parser.add_argument("--min-magnitude", type=float, default=None)
-    parser.add_argument("--output-dir", type=Path, default=Path("output"))
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     return parser.parse_args()
 
 
