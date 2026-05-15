@@ -1,0 +1,7 @@
+# Top-level dependencies for scripts in this repository
+numpy
+matplotlib
+pandas
+scipy
+obspy
+openpyxl

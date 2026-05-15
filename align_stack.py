@@ -13,18 +13,18 @@ from obspy.signal.rotate import rotate_ne_rt
 from scipy.signal import hilbert
 from scipy.signal.windows import gaussian
 
-min_freq, max_freq            = 7.0, 20.0 # Bandpass filter (Hz)
-# start_time, end_time          = -10.0, 20 # Plotting time window (seconds since origin)
+min_freq, max_freq            = 3.0, 10.0 # Bandpass filter (Hz)
+start_time, end_time          = -10.0, 20 # Plotting time window (seconds since origin)
 # start_time, end_time          = -1990.0, 3690.0 # Plotting time window (seconds since origin)
-start_time, end_time          = -1990.0, 15000 # Plotting time window (seconds since origin)
+# start_time, end_time          = -1990.0, 15000 # Plotting time window (seconds since origin)
 win_pre, win_post             = 0.5,  0.5 # Correlation window parameters (seconds)
 r_window_min                  = 0.6       # Minimum correlation coefficient for trace selection
 move_limit_sec                = 0.05      # Maximum allowed shift (seconds) searched in compute_lag
 
 # Run modes
 all_channels = True  # If True to process all channels
-component   = "Z"       # Component selection: 'Z', 'R', or 'T'
-align_phase = "P"       # Alignment phase 'P' or 'S'
+component   = "R"       # Component selection: 'Z', 'R', or 'T'
+align_phase = "S"       # Alignment phase 'P' or 'S'
 verbose     = False     # If True, print detailed processing info
 
 # Paths
