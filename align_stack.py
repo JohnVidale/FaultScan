@@ -28,7 +28,7 @@ align_phase = "S"       # Alignment phase 'P' or 'S'
 verbose     = False     # If True, print detailed processing info
 
 # Paths
-path_prefix = "/Users/vidale/Documents/Research/Mingze_SJF/"
+path_prefix = "/Users/vidale/Documents/Research/FaultScan/"
 info_root = Path(path_prefix + "20220930_events_cut/event_sta_info")
 
 # sps_rate = "down50"  # Subdirectory name indicating the sampling rate of the data (e.g., "down50", "down100", etc.)
@@ -50,6 +50,34 @@ show_record_section_plot = False  # Show aligned record sections (single + 3-com
 _start_cpu_time = time.process_time()
 _start_wall_time = time.perf_counter()
 _timing_reported = False
+_stage_wall_times = {}
+_stage_cpu_times = {}
+_stage_counts = {}
+
+
+def add_stage_timing(stage_name: str, wall_start: float, cpu_start: float) -> None:
+    """Accumulate elapsed wall/cpu time for a named processing stage."""
+    wall_dt = time.perf_counter() - wall_start
+    cpu_dt = time.process_time() - cpu_start
+    _stage_wall_times[stage_name] = _stage_wall_times.get(stage_name, 0.0) + wall_dt
+    _stage_cpu_times[stage_name] = _stage_cpu_times.get(stage_name, 0.0) + cpu_dt
+    _stage_counts[stage_name] = _stage_counts.get(stage_name, 0) + 1
+
+
+def report_stage_timing() -> None:
+    """Print stage-level timing summary sorted by wall time."""
+    if not _stage_wall_times:
+        return
+    total_wall = sum(_stage_wall_times.values())
+    print("\033[36mStage timing breakdown (wall/cpu):\033[0m")
+    for name, wall_sec in sorted(_stage_wall_times.items(), key=lambda kv: kv[1], reverse=True):
+        cpu_sec = _stage_cpu_times.get(name, 0.0)
+        calls = _stage_counts.get(name, 0)
+        frac = (100.0 * wall_sec / total_wall) if total_wall > 0 else 0.0
+        print(
+            f"  {name:<28} wall={wall_sec:7.2f}s  cpu={cpu_sec:7.2f}s  "
+            f"calls={calls:3d}  ({frac:5.1f}%)"
+        )
 
 
 catalog_local_file = info_root / "catalog_local_hand.xlsx"
@@ -129,6 +157,7 @@ def report_timing_once() -> None:
     cpu_sec = time.process_time() - _start_cpu_time
     wall_sec = time.perf_counter() - _start_wall_time
     print(f"\033[31mTiming: cpu={cpu_sec:.2f}s  wall={wall_sec:.2f}s\033[0m")
+    report_stage_timing()
     _timing_reported = True
 
 
@@ -157,29 +186,58 @@ def add_catalog_event_lines(ax, origin_time, catalog_df, tmin, tmax) -> None:
         color = color_map.get(skip_int, "red")
         ax.axvline(x=dt, color=color, lw=1.1, alpha=0.8, zorder=6)
 
+
+def get_component_selection(all_channels_mode: bool, comp: str):
+    """Return (channels, process_as_three_comp, selected_components)."""
+    if all_channels_mode:
+        return ["DPZ", "DP1", "DP2"], True, ["Z", "R", "T"]
+    if comp == "Z":
+        return ["DPZ"], False, ["Z"]
+    if comp in ("R", "T"):
+        # Single-component R/T still reads both horizontals for rotation.
+        return ["DP1"], False, [comp]
+    raise ValueError("component must be 'Z', 'R', or 'T'")
+
+
+def ensure_utc_datetime(dt_obj):
+    """Return a timezone-aware UTC datetime for printing/labeling."""
+    if dt_obj.tzinfo is None:
+        return dt_obj.replace(tzinfo=timezone.utc)
+    return dt_obj.astimezone(timezone.utc)
+
+
+def correlation_time_bounds(start_t, win_start_samp, win_end_samp, samp_rate, move_sec, npts):
+    """Compute correlation window and search bounds in seconds since origin."""
+    t_win_start = start_t + (win_start_samp / samp_rate)
+    t_win_end = start_t + (win_end_samp / samp_rate)
+    t_explore_start = max(start_t, t_win_start - move_sec)
+    t_explore_end = min(start_t + (npts / samp_rate), t_win_end + move_sec)
+    return t_win_start, t_win_end, t_explore_start, t_explore_end
+
+
+def draw_correlation_markers(ax, start_t, win_start_samp, win_end_samp, samp_rate, move_sec, npts):
+    """Draw yellow (window) and green (search) vertical bounds on one axis."""
+    t_win_start, t_win_end, t_explore_start, t_explore_end = correlation_time_bounds(
+        start_t, win_start_samp, win_end_samp, samp_rate, move_sec, npts
+    )
+    ax.axvline(x=t_win_start, color="y", lw=2, alpha=0.9, zorder=7)
+    ax.axvline(x=t_win_end, color="y", lw=2, alpha=0.9, zorder=7)
+    ax.axvline(x=t_explore_start, color="g", lw=2, alpha=0.9, zorder=7)
+    ax.axvline(x=t_explore_end, color="g", lw=2, alpha=0.9, zorder=7)
+
 # ===================== Channel / component selection =====================
 # User-facing components: Z, R, T
-if all_channels:
-    channels = ["DPZ", "DP1", "DP2"]
-    process_as_three_comp = True
-    sel_comp_list = ["Z", "R", "T"]
-else:
-    process_as_three_comp = False
-    if component == "Z":
-        channels = ["DPZ"]
-        sel_comp_list = ["Z"]
-    elif component in ("R", "T"):
-        # Process a single R/T component, but read both horizontals internally for rotation
-        channels = ["DP1"]
-        sel_comp_list = [component]
-    else:
-        raise ValueError("component must be 'Z', 'R', or 'T'")
+channels, process_as_three_comp, sel_comp_list = get_component_selection(
+    all_channels, component
+)
 
 
 # ===================== Main loop =====================
 # Storage for three-component mode
 if process_as_three_comp:
     all_component_data = {}
+    horizontal_window_cache = {}
+    horizontal_raw_limits_cache = {}
 
 for idx, channel in enumerate(channels):
     sel_comp = sel_comp_list[idx]
@@ -217,87 +275,109 @@ for idx, channel in enumerate(channels):
         name2ll = {sta_name[i]: (sta_lat[i], sta_lon[i]) for i in range(len(sta_name))}
 
         # ---- Read waveforms for all stations ----
-        st_all = Stream()
-        stanum = 0
-        raw_limits_by_station = {}
+        use_horizontal_cache = (
+            process_as_three_comp
+            and channel == "DP2"
+            and eve_id in horizontal_window_cache
+        )
 
-        for sta, (slat, slon) in name2ll.items():
-            code_num = int(sta)
-            code_str = f"{code_num:05d}"
+        if use_horizontal_cache:
+            st_window = horizontal_window_cache[eve_id].copy()
+            raw_limits_by_station = horizontal_raw_limits_cache.get(eve_id, {}).copy()
+            print("Reusing horizontal read cache for transverse component.")
+        else:
+            st_all = Stream()
+            stanum = 0
+            raw_limits_by_station = {}
 
-            # If requested channel is horizontal, read both DP1 and DP2 (needed for rotation).
-            if channel in ["DP1", "DP2"]:
-                chan_list_this_sta = ["DP1", "DP2"]
-            else:
-                chan_list_this_sta = [channel]
+            _read_wall_start = time.perf_counter()
+            _read_cpu_start = time.process_time()
+            for sta, (slat, slon) in name2ll.items():
+                code_num = int(sta)
+                code_str = f"{code_num:05d}"
 
-            # Epicentral distance
-            dist_deg = locations2degrees(eve_lat, eve_lon, slat, slon)
-            dist_km = degrees2kilometers(dist_deg)
+                # If requested channel is horizontal, read both DP1 and DP2 (needed for rotation).
+                if channel in ["DP1", "DP2"]:
+                    chan_list_this_sta = ["DP1", "DP2"]
+                else:
+                    chan_list_this_sta = [channel]
 
-            first_chan_for_sta = True
+                # Epicentral distance
+                dist_deg = locations2degrees(eve_lat, eve_lon, slat, slon)
+                dist_km = degrees2kilometers(dist_deg)
 
-            for ch_read in chan_list_this_sta:
-                fpath = (
-                    data_path
-                    / code_str
-                    / f"{ch_read}.D"
-                    / f"7V.{code_str}.00.{ch_read}.D.2022.273.{sps_rate}.mseed"
-                )
-                if verbose:
-                    if stanum % 20 == 0:
-                        print(f"Reading station {sta} channel {ch_read} from {fpath}")
-                if not fpath.exists():
+                first_chan_for_sta = True
+
+                for ch_read in chan_list_this_sta:
+                    fpath = (
+                        data_path
+                        / code_str
+                        / f"{ch_read}.D"
+                        / f"7V.{code_str}.00.{ch_read}.D.2022.273.{sps_rate}.mseed"
+                    )
                     if verbose:
-                        print("No such file")
-                    continue
+                        if stanum % 20 == 0:
+                            print(f"Reading station {sta} channel {ch_read} from {fpath}")
+                    if not fpath.exists():
+                        if verbose:
+                            print("No such file")
+                        continue
 
-                # Read the component and slice [origin + start_time, origin + end_time]
-                tr_raw = read(str(fpath))[0]
-                if sta not in raw_limits_by_station:
-                    raw_limits_by_station[sta] = (tr_raw.stats.starttime, tr_raw.stats.endtime)
-                tr = tr_raw.slice(starttime=origin + start_time, endtime=origin + end_time)
-                if (tr is None) or (tr.stats.npts == 0):
-                    continue
+                    # Read only the requested time window to reduce I/O.
+                    st_win = read(
+                        str(fpath),
+                        starttime=origin + start_time,
+                        endtime=origin + end_time,
+                    )
+                    if len(st_win) == 0:
+                        continue
+                    tr = st_win[0]
+                    if sta not in raw_limits_by_station:
+                        raw_limits_by_station[sta] = (tr.stats.starttime, tr.stats.endtime)
 
-                # Store metadata for later plotting/selection
-                tr.stats.dist_km = dist_km
-                tr.stats.dist_deg = dist_deg
-                tr.stats.relatime = tr.times(reftime=origin)
-                tr.stats.station = sta
-                st_all.append(tr)
+                    # Store metadata for later plotting/selection
+                    tr.stats.dist_km = dist_km
+                    tr.stats.dist_deg = dist_deg
+                    tr.stats.relatime = tr.times(reftime=origin)
+                    tr.stats.station = sta
+                    st_all.append(tr)
 
-                # Count stations (once per station)
-                if first_chan_for_sta:
-                    stanum += 1
-                    if stanum % 100 == 0:
-                        print(f"Event {eve_id}: processed {stanum} stations...")
-                    first_chan_for_sta = False
+                    # Count stations (once per station)
+                    if first_chan_for_sta:
+                        stanum += 1
+                        if stanum % 100 == 0:
+                            print(f"Event {eve_id}: processed {stanum} stations...")
+                        first_chan_for_sta = False
+            add_stage_timing("waveform_read_slice", _read_wall_start, _read_cpu_start)
 
-        # ---- Sort by distance ----
-        st_all.sort(keys=["dist_km"])
-        if not st_all:
-            print(f"No traces found for event {eve_id}, skip.")
-            continue
+            # ---- Sort by distance ----
+            st_all.sort(keys=["dist_km"])
+            if not st_all:
+                print(f"No traces found for event {eve_id}, skip.")
+                continue
 
-        # (Reference travel times are computed after picking the reference station.)
+            # (Reference travel times are computed after picking the reference station.)
 
-        # ---- Keep traces that cover [origin + start_time, origin + end_time] ----
-        st_window = Stream()
-        kept = 0
+            # ---- Keep traces that cover [origin + start_time, origin + end_time] ----
+            st_window = Stream()
+            kept = 0
 
-        for tr in st_all:
-            # Keep the entire [start_time, end_time] record as long as it covers the plot window
-            if tr.stats.endtime >= origin + start_time and tr.stats.starttime <= origin + end_time:
-                tr_i = tr.copy()
-                if tr_i is not None and tr_i.stats.npts > 0:
-                    tr_i.stats.station = tr.stats.station
-                    st_window.append(tr_i)
-                    kept += 1
+            for tr in st_all:
+                # Keep the entire [start_time, end_time] record as long as it covers the plot window
+                if tr.stats.endtime >= origin + start_time and tr.stats.starttime <= origin + end_time:
+                    tr_i = tr.copy()
+                    if tr_i is not None and tr_i.stats.npts > 0:
+                        tr_i.stats.station = tr.stats.station
+                        st_window.append(tr_i)
+                        kept += 1
 
-        if kept == 0:
-            print("  No data in plot window (start_time to end_time).")
-            continue
+            if kept == 0:
+                print("  No data in plot window (start_time to end_time).")
+                continue
+
+            if process_as_three_comp and channel == "DP1":
+                horizontal_window_cache[eve_id] = st_window.copy()
+                horizontal_raw_limits_cache[eve_id] = raw_limits_by_station.copy()
 
         # Label to show on the figure
         plot_comp = sel_comp
@@ -311,6 +391,8 @@ for idx, channel in enumerate(channels):
             stE = st_window.select(channel="DP2")
             rotated_traces = []
 
+            _rotate_wall_start = time.perf_counter()
+            _rotate_cpu_start = time.process_time()
             for trN in stN:
                 sid = str(trN.stats.station)
                 stE_match = stE.select(station=sid)
@@ -341,6 +423,8 @@ for idx, channel in enumerate(channels):
                     trT.stats.channel = trN.stats.channel[:-1] + "T"
                     rotated_traces.append(trT)
                     plot_comp = "T"
+
+            add_stage_timing("rotate_to_rt", _rotate_wall_start, _rotate_cpu_start)
 
             st_comp = Stream(traces=rotated_traces)
         else:
@@ -386,26 +470,18 @@ for idx, channel in enumerate(channels):
         print(f"    Epicentral distance ≈ {ref_trace.stats.dist_km:.1f} km")
         ref_start = ref_trace.stats.starttime
         ref_end = ref_trace.stats.endtime
-        ref_start_dt = ref_start.datetime
-        ref_end_dt = ref_end.datetime
-        if ref_start_dt.tzinfo is None:
-            ref_start_dt = ref_start_dt.replace(tzinfo=timezone.utc)
-        if ref_end_dt.tzinfo is None:
-            ref_end_dt = ref_end_dt.replace(tzinfo=timezone.utc)
+        ref_start_dt = ensure_utc_datetime(ref_start.datetime)
+        ref_end_dt = ensure_utc_datetime(ref_end.datetime)
         print(
             "\033[32m    Reference seismogram UTC window: "
             f"{ref_start_dt.isoformat()} to {ref_end_dt.isoformat()}\033[0m"
         )
         if ref_station_id in raw_limits_by_station:
             raw_start, raw_end = raw_limits_by_station[ref_station_id]
-            raw_start_dt = raw_start.datetime
-            raw_end_dt = raw_end.datetime
-            if raw_start_dt.tzinfo is None:
-                raw_start_dt = raw_start_dt.replace(tzinfo=timezone.utc)
-            if raw_end_dt.tzinfo is None:
-                raw_end_dt = raw_end_dt.replace(tzinfo=timezone.utc)
+            raw_start_dt = ensure_utc_datetime(raw_start.datetime)
+            raw_end_dt = ensure_utc_datetime(raw_end.datetime)
             print(
-                "\033[32m    Reference raw read UTC window: "
+                "\033[32m    Reference read UTC window: "
                 f"{raw_start_dt.isoformat()} to {raw_end_dt.isoformat()}\033[0m"
             )
 
@@ -446,6 +522,8 @@ for idx, channel in enumerate(channels):
             continue
 
         # ---- Preprocess traces (detrend/taper/filter) ----
+        _pre_wall_start = time.perf_counter()
+        _pre_cpu_start = time.process_time()
         for tr in st_comp:
             tr.detrend(type="demean")
             trace_len_sec = float(tr.stats.npts) / float(tr.stats.sampling_rate)
@@ -458,6 +536,7 @@ for idx, channel in enumerate(channels):
                 corners=4,
                 zerophase=True,
             )
+        add_stage_timing("preprocess_filter", _pre_wall_start, _pre_cpu_start)
 
         # ---- Common length / sampling rate ----
         npts = min(tr.stats.npts for tr in st_comp)
@@ -485,6 +564,8 @@ for idx, channel in enumerate(channels):
         calc_shifts = {}
         if t_ref is not None:
             phase_key = align_phase.upper()
+            _taup_wall_start = time.perf_counter()
+            _taup_cpu_start = time.process_time()
             for tr in st_comp:
                 station_id = str(tr.stats.station)
                 dist_deg = float(tr.stats.dist_deg)
@@ -502,9 +583,12 @@ for idx, channel in enumerate(channels):
 
                 if t_sta is not None:
                     calc_shifts[station_id] = t_sta - t_ref
+            add_stage_timing("taup_station_shifts", _taup_wall_start, _taup_cpu_start)
 
         # ===================== Stage 1: align to reference -> aligned_stack =====================
         aligned_stack = np.zeros(npts)
+        _stage1_wall_start = time.perf_counter()
+        _stage1_cpu_start = time.process_time()
         for tr in st_comp:
             d = tr.data[:npts]
             lag0 = 0
@@ -522,6 +606,7 @@ for idx, channel in enumerate(channels):
                 lag1 = lag0 + compute_lag(ref, rolled, win_start, win_end)
 
             aligned_stack += shift_left_zeropad(d, lag1)
+        add_stage_timing("align_stage1", _stage1_wall_start, _stage1_cpu_start)
 
         win = aligned_stack[win_start:win_end]
         mx = np.max(np.abs(win)) if win.size > 0 else 0.0
@@ -536,6 +621,8 @@ for idx, channel in enumerate(channels):
         pass_window_ids = set()
         snippet_by_station = {}
 
+        _stage2_wall_start = time.perf_counter()
+        _stage2_cpu_start = time.process_time()
         for tr in st_comp:
             d = tr.data[:npts]
             station_id = str(tr.stats.station)
@@ -577,6 +664,7 @@ for idx, channel in enumerate(channels):
                 selected_ids.add(station_id)
             else:
                 print(f"    Rejected {station_id}: r_win={r_window:.2f}")
+        add_stage_timing("align_stage2_screen", _stage2_wall_start, _stage2_cpu_start)
 
         win = selected_aligned_stack[win_start:win_end]
         mx = np.max(np.abs(win)) if win.size > 0 else 0.0
@@ -592,6 +680,8 @@ for idx, channel in enumerate(channels):
         station_shifts = {}  # Track shifts for each station
         aligned_traces_by_station = {}  # station_id -> final aligned & normalized trace (for later stacking)
 
+        _stage3_wall_start = time.perf_counter()
+        _stage3_cpu_start = time.process_time()
         for tr in st_comp:
             x = tr.data[:npts]
             station_id = str(tr.stats.station)
@@ -638,6 +728,7 @@ for idx, channel in enumerate(channels):
                 aligned_bank.append(y)
             else:
                 rejected_rows.append((dist_km, station_id, y))
+        add_stage_timing("align_stage3_finalize", _stage3_wall_start, _stage3_cpu_start)
 
 
         selected_rows.sort(key=lambda t: t[0])
@@ -663,6 +754,8 @@ for idx, channel in enumerate(channels):
             stack_vec = np.zeros_like(t_abs)
 
         # ---- Plot: superposition of Stage1/Stage2/Final stacks ----
+        _plot_wall_start = time.perf_counter()
+        _plot_cpu_start = time.process_time()
         if not all_channels:
             fig_stk, ax_stk = plt.subplots(1, 1, figsize=(10, 3.8))
             set_figure_title(fig_stk, f"{eve_id} {plot_comp} stage stacks")
@@ -754,30 +847,30 @@ for idx, channel in enumerate(channels):
         # Cross-correlation window bounds as vertical yellow lines
         if show_record_section_plot:
             try:
-                t_win_start = start_time + (win_start / sample_rate)
-                t_win_end = start_time + (win_end / sample_rate)
                 for axi in (ax, ax2):
-                    axi.axvline(x=t_win_start, color="y", lw=2, alpha=0.9, zorder=7)
-                    axi.axvline(x=t_win_end, color="y", lw=2, alpha=0.9, zorder=7)
+                    draw_correlation_markers(
+                        axi,
+                        start_time,
+                        win_start,
+                        win_end,
+                        sample_rate,
+                        move_limit_sec,
+                        npts,
+                    )
             except Exception as e:
                 print(f"    [WARN] Failed to draw correlation window bounds: {e}")
-
-        # Cross-correlation search limits (green): yellow window expanded by move_limit_sec
-        if show_record_section_plot:
-            try:
-                t_explore_start = t_win_start - move_limit_sec
-                t_explore_end = t_win_end + move_limit_sec
-                t_explore_start = max(start_time, t_explore_start)
-                t_explore_end = min(start_time + (npts / sample_rate), t_explore_end)
-                for axi in (ax, ax2):
-                    axi.axvline(x=t_explore_start, color="g", lw=2, alpha=0.9, zorder=7)
-                    axi.axvline(x=t_explore_end, color="g", lw=2, alpha=0.9, zorder=7)
-            except Exception as e:
-                print(f"    [WARN] Failed to draw correlation search limits: {e}")
 
         # Legend for window bounds
         if show_record_section_plot:
             try:
+                t_win_start, t_win_end, _, _ = correlation_time_bounds(
+                    start_time,
+                    win_start,
+                    win_end,
+                    sample_rate,
+                    move_limit_sec,
+                    npts,
+                )
                 legend_handles = [
                     Line2D([0], [0], color='y', lw=2, label='Correlation window'),
                     Line2D([0], [0], color='g', lw=2, label='Correlation search (±move_limit_sec)'),
@@ -1131,6 +1224,8 @@ for idx, channel in enumerate(channels):
             except Exception as e:
                 print(f"[WARN] Failed to create station pass/fail maps: {e}")
 
+            add_stage_timing("plot_and_save", _plot_wall_start, _plot_cpu_start)
+
             # Show figures for single-component mode
             report_timing_once()
             plt.show()
@@ -1139,6 +1234,8 @@ for idx, channel in enumerate(channels):
 
 # ===================== Three-component combined plotting =====================
 if process_as_three_comp and len(all_component_data) == 3:
+    _plot3_wall_start = time.perf_counter()
+    _plot3_cpu_start = time.process_time()
     print(f"\\n{'='*70}")
     print(f"Creating combined three-component plot...")
     print(f"{'='*70}\\n")
@@ -1231,23 +1328,17 @@ if process_as_three_comp and len(all_component_data) == 3:
                 ax.axvline(x=t_ref, color='r', lw=2, alpha=0.6, linestyle='--', zorder=6)
             # Cross-correlation window bounds
             try:
-                t_win_start = start_time + (win_start / sample_rate)
-                t_win_end = start_time + (win_end / sample_rate)
-                ax.axvline(x=t_win_start, color='y', lw=2, alpha=0.9, zorder=7)
-                ax.axvline(x=t_win_end, color='y', lw=2, alpha=0.9, zorder=7)
+                draw_correlation_markers(
+                    ax,
+                    start_time,
+                    win_start,
+                    win_end,
+                    sample_rate,
+                    move_limit_sec,
+                    npts,
+                )
             except Exception as e:
                 print(f"[WARN] Failed to draw correlation window bounds (top {comp_name}): {e}")
-
-            # Cross-correlation search limits (green): yellow window expanded by move_limit_sec
-            try:
-                t_explore_start = t_win_start - move_limit_sec
-                t_explore_end = t_win_end + move_limit_sec
-                t_explore_start = max(start_time, t_explore_start)
-                t_explore_end = min(start_time + (npts / sample_rate), t_explore_end)
-                ax.axvline(x=t_explore_start, color='g', lw=2, alpha=0.9, zorder=7)
-                ax.axvline(x=t_explore_end, color='g', lw=2, alpha=0.9, zorder=7)
-            except Exception as e:
-                print(f"[WARN] Failed to draw correlation search limits (top {comp_name}): {e}")
 
             # Legend for window bounds (only once, top-left panel)
             if idx == 0:
@@ -1283,23 +1374,17 @@ if process_as_three_comp and len(all_component_data) == 3:
                 ax2.axvline(x=t_ref, color='r', lw=2, alpha=0.6, linestyle='--', zorder=6)
             # Cross-correlation window bounds
             try:
-                t_win_start = start_time + (win_start / sample_rate)
-                t_win_end = start_time + (win_end / sample_rate)
-                ax2.axvline(x=t_win_start, color='y', lw=2, alpha=0.9, zorder=7)
-                ax2.axvline(x=t_win_end, color='y', lw=2, alpha=0.9, zorder=7)
+                draw_correlation_markers(
+                    ax2,
+                    start_time,
+                    win_start,
+                    win_end,
+                    sample_rate,
+                    move_limit_sec,
+                    npts,
+                )
             except Exception as e:
                 print(f"[WARN] Failed to draw correlation window bounds (bottom {comp_name}): {e}")
-
-            # Cross-correlation search limits (green): yellow window expanded by move_limit_sec
-            try:
-                t_explore_start = t_win_start - move_limit_sec
-                t_explore_end = t_win_end + move_limit_sec
-                t_explore_start = max(start_time, t_explore_start)
-                t_explore_end = min(start_time + (npts / sample_rate), t_explore_end)
-                ax2.axvline(x=t_explore_start, color='g', lw=2, alpha=0.9, zorder=7)
-                ax2.axvline(x=t_explore_end, color='g', lw=2, alpha=0.9, zorder=7)
-            except Exception as e:
-                print(f"[WARN] Failed to draw correlation search limits (bottom {comp_name}): {e}")
 
         stack_by_comp[comp_name] = stack_vec
 
@@ -1893,6 +1978,8 @@ if process_as_three_comp and len(all_component_data) == 3:
         estcalc_file = save_dir / f"{eve_id}_est_vs_calc_shift_{align_phase}.png"
         fig_ec.savefig(estcalc_file, dpi=300, bbox_inches='tight')
         print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
+
+    add_stage_timing("plot_three_component", _plot3_wall_start, _plot3_cpu_start)
 
         # Show all figures together (three-component + shift comparison)
         # plt.show()

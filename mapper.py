@@ -26,7 +26,7 @@ PFO_LAT = 33.6092
 PFO_LON = -116.4550
 EARTH_RADIUS_KM = 6371.0088
 USGS_EVENT_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query"
-OUTPUT_DIR = Path("/Users/vidale/Documents/Research/Mingze_SJF/output")
+OUTPUT_DIR = Path("/Users/vidale/Documents/Research/FaultScan/output")
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
