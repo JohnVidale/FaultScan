@@ -95,7 +95,13 @@ except Exception as e:
 model = TauPyModel(model="iasp91")
 
 # ===================== Helper functions =====================
-def compute_lag(ref: np.ndarray, d: np.ndarray, win_start: int, win_end: int) -> int:
+def compute_lag(
+    ref: np.ndarray,
+    d: np.ndarray,
+    win_start: int,
+    win_end: int,
+    move_limit_samples: int,
+) -> int:
     """Compute integer lag (samples) by maximizing correlation within a short window.
 
     This matches the original implementation:
@@ -225,6 +231,773 @@ def draw_correlation_markers(ax, start_t, win_start_samp, win_end_samp, samp_rat
     ax.axvline(x=t_explore_start, color="g", lw=2, alpha=0.9, zorder=7)
     ax.axvline(x=t_explore_end, color="g", lw=2, alpha=0.9, zorder=7)
 
+
+def add_utc_time_axis(ax, origin_time, tick_tz=timezone.utc, label_size: int = 10) -> None:
+    """Add a bottom UTC axis that mirrors the primary x-axis ticks."""
+    if origin_time is None:
+        return
+    origin_dt_utc = ensure_utc_datetime(origin_time.datetime)
+    ax_time = ax.twiny()
+    ax_time.set_xlim(ax.get_xlim())
+    ax_time.xaxis.set_label_position("bottom")
+    ax_time.xaxis.set_ticks_position("bottom")
+    ax_time.spines["bottom"].set_position(("outward", 36))
+    ax_time.spines["top"].set_visible(False)
+
+    ticks = ax.get_xticks()
+    labels = [
+        (origin_dt_utc + timedelta(seconds=float(t))).astimezone(tick_tz).strftime("%H:%M:%S")
+        for t in ticks
+    ]
+    ax_time.set_xticks(ticks)
+    ax_time.set_xticklabels(labels)
+    date_str = origin_dt_utc.date().isoformat()
+    ax_time.set_xlabel(f"UTC time ({date_str})", fontsize=label_size)
+
+
+def plot_stage_stacks(
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    t_abs: np.ndarray,
+    mask: np.ndarray,
+    aligned_stack: np.ndarray,
+    selected_aligned_stack: np.ndarray,
+    stack_vec: np.ndarray,
+    save_dir: Path,
+) -> None:
+    """Plot and save Stage-1/Stage-2/Final stacks for single-component runs."""
+    fig_stk, ax_stk = plt.subplots(1, 1, figsize=(10, 3.8))
+    set_figure_title(fig_stk, f"{eve_id} {plot_comp} stage stacks")
+    ax_stk.plot(t_abs[mask], aligned_stack[mask], color="C0", lw=2, label="Stage 1: aligned_stack")
+    ax_stk.plot(
+        t_abs[mask],
+        selected_aligned_stack[mask],
+        color="C1",
+        lw=2,
+        label="Stage 2: selected_aligned_stack",
+    )
+    ax_stk.plot(t_abs[mask], stack_vec[mask], color="C3", lw=2.2, label="Final stack")
+    ax_stk.axhline(0.0, color="k", lw=0.6, alpha=0.6)
+    ax_stk.set_xlim(start_time, end_time)
+    ax_stk.set_ylim(-1.1, 1.1)
+    ax_stk.grid(alpha=0.2)
+    ax_stk.set_xlabel("Time since origin (s)")
+    ax_stk.set_ylabel("Stack (norm.)")
+    ax_stk.set_title(f"Event {eve_id} {plot_comp}: Stage-1/Stage-2/Final stacks")
+    ax_stk.legend(loc="upper right", fontsize=9)
+    plt.tight_layout()
+    stack_file = save_dir / f"{eve_id}_{plot_comp}_stage_stacks_{align_phase_name}.png"
+    fig_stk.savefig(stack_file, dpi=300, bbox_inches="tight")
+    print(f"✓ Stage stacks plot saved to: {stack_file}")
+
+
+def plot_record_section_and_stack(
+    show_record: bool,
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    selected_rows: list,
+    rejected_rows: list,
+    t_abs: np.ndarray,
+    mask: np.ndarray,
+    sample_rate: float,
+    t_ref,
+    win_start: int,
+    win_end: int,
+    move_sec: float,
+    npts: int,
+    n_pass_window: int,
+    stack_vec: np.ndarray,
+    save_dir: Path,
+):
+    """Plot and save record section (top) plus normalized stack (bottom)."""
+    if not show_record:
+        return None
+
+    fig, (ax, ax2) = plt.subplots(
+        2,
+        1,
+        figsize=(10, 9),
+        sharex=False,
+        gridspec_kw={"height_ratios": [3, 1]},
+    )
+    set_figure_title(fig, f"{eve_id} {plot_comp} aligned record section")
+
+    all_rows = selected_rows + rejected_rows
+    all_rows.sort(key=lambda t: t[0])
+    t_masked = t_abs[mask]
+
+    if len(all_rows) > 0 and np.any(mask):
+        A = np.vstack([row[2][mask] for row in all_rows])
+        dvec = np.array([row[0] for row in all_rows], dtype=float)
+
+        # y-edges for irregular station spacing
+        if len(dvec) == 1:
+            y_edges = np.array([dvec[0] - 0.5, dvec[0] + 0.5])
+        else:
+            mids = 0.5 * (dvec[1:] + dvec[:-1])
+            y_edges = np.empty(len(dvec) + 1)
+            y_edges[1:-1] = mids
+            y_edges[0] = dvec[0] - (mids[0] - dvec[0])
+            y_edges[-1] = dvec[-1] + (dvec[-1] - mids[-1])
+
+        # t-edges for pcolormesh
+        if len(t_masked) == 1:
+            t_edges = np.array(
+                [t_masked[0] - 0.5 / sample_rate, t_masked[0] + 0.5 / sample_rate]
+            )
+        else:
+            tmids = 0.5 * (t_masked[1:] + t_masked[:-1])
+            t_edges = np.empty(len(t_masked) + 1)
+            t_edges[1:-1] = tmids
+            t_edges[0] = t_masked[0] - (tmids[0] - t_masked[0])
+            t_edges[-1] = t_masked[-1] + (t_masked[-1] - tmids[-1])
+
+        ax.pcolormesh(
+            t_edges,
+            y_edges,
+            A,
+            cmap="gray",
+            shading="auto",
+            vmin=-1.0,
+            vmax=1.0,
+        )
+
+    ax.set_xlim(start_time, end_time)
+    ax.set_xlabel("Time since origin (s)")
+    ax.set_ylabel("Epicentral distance (km)")
+    ax.set_title(f"Aligned {align_phase_name} waveforms Event {eve_id} comp = {plot_comp}")
+    ax.grid(alpha=0.2)
+
+    # Theoretical arrival time (reference station) as a vertical reference line
+    try:
+        if t_ref is not None:
+            for axi in (ax, ax2):
+                axi.axvline(x=t_ref, color="k", lw=3, alpha=0.5, zorder=6)
+    except Exception as e:
+        print(f"    [WARN] Failed to draw vertical reference arrival for {align_phase_name}: {e}")
+
+    # Correlation window and search bounds
+    try:
+        for axi in (ax, ax2):
+            draw_correlation_markers(
+                axi,
+                start_time,
+                win_start,
+                win_end,
+                sample_rate,
+                move_sec,
+                npts,
+            )
+    except Exception as e:
+        print(f"    [WARN] Failed to draw correlation window bounds: {e}")
+
+    try:
+        legend_handles = [
+            Line2D([0], [0], color="y", lw=2, label="Correlation window"),
+            Line2D([0], [0], color="g", lw=2, label="Correlation search (±move_limit_sec)"),
+            Line2D([0], [0], color="none", label=f"Pass r_win: {n_pass_window}"),
+        ]
+        ax.legend(
+            handles=legend_handles,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1.0),
+            borderaxespad=0.0,
+            fontsize=9,
+        )
+    except Exception as e:
+        print(f"    [WARN] Failed to add legend: {e}")
+
+    # Bottom panel: normalized stack
+    ax2.plot(t_abs[mask], stack_vec[mask], color="C3", lw=1.5)
+    ax2.axhline(0.0, color="k", lw=0.6)
+    ax2.set_xlim(start_time, end_time)
+    ax2.set_xlabel("Time since origin (s)")
+    ax2.set_ylabel("Stack (norm.)")
+    ax2.set_ylim(-1.1, 1.1)
+    ax2.set_title("Final stack uses ALL traces (no screening)")
+    ax2.grid(alpha=0.2)
+
+    plt.tight_layout()
+    record_file = save_dir / f"{eve_id}_{plot_comp}_{align_phase_name}.png"
+    fig.savefig(record_file, dpi=300, bbox_inches="tight")
+    print(f"✓ Record-section plot saved to: {record_file}")
+    return fig
+
+
+def resolve_component_key(channel: str, sel_comp: str) -> str:
+    """Resolve storage key used in three-component aggregate output."""
+    if channel == "DPZ":
+        return "DPZ"
+    if sel_comp == "R":
+        return "R"
+    if sel_comp == "T":
+        return "T"
+    return channel
+
+
+def build_component_output_payload(
+    record_fig,
+    selected_rows: list,
+    rejected_rows: list,
+    stack_vec: np.ndarray,
+    t_abs: np.ndarray,
+    mask: np.ndarray,
+    sample_rate: float,
+    win_start: int,
+    win_end: int,
+    move_limit_sec_value: float,
+    move_limit_samples: int,
+    npts: int,
+    start_t: float,
+    end_t: float,
+    eve_id: str,
+    align_phase_name: str,
+    origin,
+    station_shifts: dict,
+    station_corr: dict,
+    calc_shifts: dict,
+    n_pass_window: int,
+    pass_window_ids: set,
+    snippet_by_station: dict,
+    ref_window: np.ndarray,
+    p_traveltime,
+    s_traveltime,
+    name2ll: dict,
+    selected_ids: set,
+    aligned_traces_by_station: dict,
+    t_ref,
+):
+    """Create deep-copied component payload used by three-component plotting."""
+    payload = {
+        "fig": record_fig,
+        "all_rows": [(r[0], r[1], r[2].copy()) for r in (selected_rows + rejected_rows)],
+        "stack_vec": stack_vec.copy(),
+        "t_abs": t_abs.copy(),
+        "mask": mask.copy(),
+        "sample_rate": sample_rate,
+        "win_start": win_start,
+        "win_end": win_end,
+        "move_limit_sec": move_limit_sec_value,
+        "move_limit_samples": move_limit_samples,
+        "npts": npts,
+        "start_time": start_t,
+        "end_time": end_t,
+        "eve_id": eve_id,
+        "align_phase": align_phase_name,
+        "origin": origin,
+        "station_shifts": station_shifts.copy(),
+        "station_corr": station_corr.copy(),
+        "calc_shifts": calc_shifts.copy(),
+        "n_pass_window": int(n_pass_window),
+        "pass_window_ids": sorted(list(pass_window_ids), key=lambda s: int(s)),
+        "snippet_by_station": {k: v.copy() for k, v in snippet_by_station.items()},
+        "ref_window": ref_window.copy(),
+        "p_traveltime": None if p_traveltime is None else float(p_traveltime),
+        "s_traveltime": None if s_traveltime is None else float(s_traveltime),
+        "station_ll": {k: (float(v[0]), float(v[1])) for k, v in name2ll.items()},
+        # Stations that passed Stage-2 screening for this component
+        "selected_ids": sorted(list(selected_ids), key=lambda s: int(s)),
+        "aligned_traces_by_station": {k: v.copy() for k, v in aligned_traces_by_station.items()},
+        "t_ref": t_ref,
+    }
+    return payload
+
+
+def load_event_metadata(eve_id: str, info_dir: Path):
+    """Load event row and return key metadata for one event id."""
+    eve_info = pd.read_csv(info_dir / "catalog_20220930_8events.csv")
+    row = eve_info.loc[eve_info["evid"] == eve_id].iloc[0]
+    event_depth = float(row["depth"])
+    eve_lat = float(row["latitude"])
+    eve_lon = float(row["longitude"])
+    origin = UTCDateTime(str(row["origin_time"]))
+    return event_depth, eve_lat, eve_lon, origin
+
+
+def make_event_output_dir(base_prefix: str, eve_id: str) -> Path:
+    """Create and return output directory for one event."""
+    save_path = Path(base_prefix + "output")
+    save_dir = save_path / eve_id
+    save_dir.mkdir(parents=True, exist_ok=True)
+    return save_dir
+
+
+def load_station_lookup(info_dir: Path):
+    """Read station coordinates and return station->(lat, lon) lookup."""
+    station_file = info_dir / "stations.txt"
+    sta_info = np.genfromtxt(
+        station_file,
+        dtype=[("name", "U10"), ("lat", "f8"), ("lon", "f8")],
+        usecols=(0, 1, 2),
+        comments="#",
+    )
+    sta_name = np.array([s.decode() if hasattr(s, "decode") else s for s in sta_info["name"]])
+    sta_lat = sta_info["lat"]
+    sta_lon = sta_info["lon"]
+    return {sta_name[i]: (sta_lat[i], sta_lon[i]) for i in range(len(sta_name))}
+
+
+def read_waveforms_for_event(
+    eve_id: str,
+    channel: str,
+    process_as_three_comp_mode: bool,
+    horizontal_window_cache: dict,
+    horizontal_raw_limits_cache: dict,
+    name2ll: dict,
+    eve_lat: float,
+    eve_lon: float,
+    origin,
+):
+    """Read (or reuse) windowed traces for an event/channel and return stream + raw limits."""
+    use_horizontal_cache = (
+        process_as_three_comp_mode
+        and channel == "DP2"
+        and eve_id in horizontal_window_cache
+    )
+
+    if use_horizontal_cache:
+        st_window = horizontal_window_cache[eve_id].copy()
+        raw_limits_by_station = horizontal_raw_limits_cache.get(eve_id, {}).copy()
+        print("Reusing horizontal read cache for transverse component.")
+        return st_window, raw_limits_by_station
+
+    st_all = Stream()
+    stanum = 0
+    raw_limits_by_station = {}
+
+    _read_wall_start = time.perf_counter()
+    _read_cpu_start = time.process_time()
+    for sta, (slat, slon) in name2ll.items():
+        code_num = int(sta)
+        code_str = f"{code_num:05d}"
+
+        # If requested channel is horizontal, read both DP1 and DP2 (needed for rotation).
+        if channel in ["DP1", "DP2"]:
+            chan_list_this_sta = ["DP1", "DP2"]
+        else:
+            chan_list_this_sta = [channel]
+
+        # Epicentral distance
+        dist_deg = locations2degrees(eve_lat, eve_lon, slat, slon)
+        dist_km = degrees2kilometers(dist_deg)
+
+        first_chan_for_sta = True
+
+        for ch_read in chan_list_this_sta:
+            fpath = (
+                data_path
+                / code_str
+                / f"{ch_read}.D"
+                / f"7V.{code_str}.00.{ch_read}.D.2022.273.{sps_rate}.mseed"
+            )
+            if verbose:
+                if stanum % 20 == 0:
+                    print(f"Reading station {sta} channel {ch_read} from {fpath}")
+            if not fpath.exists():
+                if verbose:
+                    print("No such file")
+                continue
+
+            # Read only the requested time window to reduce I/O.
+            st_win = read(
+                str(fpath),
+                starttime=origin + start_time,
+                endtime=origin + end_time,
+            )
+            if len(st_win) == 0:
+                continue
+            tr = st_win[0]
+            if sta not in raw_limits_by_station:
+                raw_limits_by_station[sta] = (tr.stats.starttime, tr.stats.endtime)
+
+            # Store metadata for later plotting/selection
+            tr.stats.dist_km = dist_km
+            tr.stats.dist_deg = dist_deg
+            tr.stats.relatime = tr.times(reftime=origin)
+            tr.stats.station = sta
+            st_all.append(tr)
+
+            # Count stations (once per station)
+            if first_chan_for_sta:
+                stanum += 1
+                if stanum % 100 == 0:
+                    print(f"Event {eve_id}: processed {stanum} stations...")
+                first_chan_for_sta = False
+    add_stage_timing("waveform_read_slice", _read_wall_start, _read_cpu_start)
+
+    # ---- Sort by distance ----
+    st_all.sort(keys=["dist_km"])
+    if not st_all:
+        print(f"No traces found for event {eve_id}, skip.")
+        return None, None
+
+    # ---- Keep traces that cover [origin + start_time, origin + end_time] ----
+    st_window = Stream()
+    kept = 0
+    for tr in st_all:
+        # Keep the entire [start_time, end_time] record as long as it covers the plot window
+        if tr.stats.endtime >= origin + start_time and tr.stats.starttime <= origin + end_time:
+            tr_i = tr.copy()
+            if tr_i is not None and tr_i.stats.npts > 0:
+                tr_i.stats.station = tr.stats.station
+                st_window.append(tr_i)
+                kept += 1
+
+    if kept == 0:
+        print("  No data in plot window (start_time to end_time).")
+        return None, None
+
+    if process_as_three_comp_mode and channel == "DP1":
+        horizontal_window_cache[eve_id] = st_window.copy()
+        horizontal_raw_limits_cache[eve_id] = raw_limits_by_station.copy()
+
+    return st_window, raw_limits_by_station
+
+
+def select_reference_trace(st_comp: Stream, name2ll: dict):
+    """Pick reference station closest to array center and return (id, trace)."""
+    st_comp.sort(keys=["dist_km"])
+    if len(st_comp) == 0:
+        return None, None
+
+    station_ids = sorted({str(tr.stats.station) for tr in st_comp})
+    center_lats = [name2ll[s][0] for s in station_ids if s in name2ll]
+    center_lons = [name2ll[s][1] for s in station_ids if s in name2ll]
+
+    ref_station_id = None
+    if len(center_lats) > 0 and len(center_lons) > 0:
+        center_lat = float(np.mean(center_lats))
+        center_lon = float(np.mean(center_lons))
+        best_dist_m = None
+        for sid in station_ids:
+            if sid not in name2ll:
+                continue
+            slat, slon = name2ll[sid]
+            dist_m, _, _ = gps2dist_azimuth(center_lat, center_lon, slat, slon)
+            if best_dist_m is None or dist_m < best_dist_m:
+                best_dist_m = dist_m
+                ref_station_id = sid
+
+    if ref_station_id is None:
+        ref_station_id = str(st_comp[0].stats.station)
+
+    ref_trace = st_comp.select(station=ref_station_id)
+    if len(ref_trace) == 0:
+        ref_trace = [st_comp[0]]
+        ref_station_id = str(ref_trace[0].stats.station)
+    return ref_station_id, ref_trace[0]
+
+
+def print_reference_summary(ref_station_id: str, ref_trace: Trace, raw_limits_by_station: dict):
+    """Print reference station and data-window summary."""
+    ref_trace_dur = float(ref_trace.stats.npts) / float(ref_trace.stats.sampling_rate)
+    print(
+        f"    Reference station (auto): {ref_station_id} (closest to array center)  "
+        f"dist_km={ref_trace.stats.dist_km:.2f}  dur_s={ref_trace_dur:.2f}"
+    )
+    print(f"    Epicentral distance ≈ {ref_trace.stats.dist_km:.1f} km")
+
+    ref_start_dt = ensure_utc_datetime(ref_trace.stats.starttime.datetime)
+    ref_end_dt = ensure_utc_datetime(ref_trace.stats.endtime.datetime)
+    print(
+        "\033[32m    Reference seismogram UTC window: "
+        f"{ref_start_dt.isoformat()} to {ref_end_dt.isoformat()}\033[0m"
+    )
+    if ref_station_id in raw_limits_by_station:
+        raw_start, raw_end = raw_limits_by_station[ref_station_id]
+        raw_start_dt = ensure_utc_datetime(raw_start.datetime)
+        raw_end_dt = ensure_utc_datetime(raw_end.datetime)
+        print(
+            "\033[32m    Reference read UTC window: "
+            f"{raw_start_dt.isoformat()} to {raw_end_dt.isoformat()}\033[0m"
+        )
+
+
+def compute_phase_travel_times(model_obj, event_depth: float, ref_trace: Trace, origin_time, align_phase_name: str):
+    """Compute P/S travel times at reference station and selected alignment phase time."""
+    ref_deg = float(ref_trace.stats.dist_deg)
+    tts = model_obj.get_travel_times(
+        source_depth_in_km=event_depth,
+        distance_in_degree=ref_deg,
+        phase_list=["p", "P", "s", "S"],
+    )
+
+    p_traveltime = None
+    s_traveltime = None
+    p_arrival_time = None
+    s_arrival_time = None
+
+    for tt in reversed(tts):
+        if tt.phase.name.upper() == "P":
+            p_traveltime = float(tt.time)
+            p_arrival_time = origin_time + p_traveltime
+        if tt.phase.name.upper() == "S":
+            s_traveltime = float(tt.time)
+            s_arrival_time = origin_time + s_traveltime
+
+    if align_phase_name == "P" and p_traveltime is not None:
+        phase_traveltime = float(p_traveltime)
+    elif align_phase_name == "S" and s_traveltime is not None:
+        phase_traveltime = float(s_traveltime)
+    else:
+        phase_traveltime = None
+
+    return p_traveltime, s_traveltime, p_arrival_time, s_arrival_time, phase_traveltime
+
+
+def compute_alignment_products(
+    st_comp: Stream,
+    ref_trace: Trace,
+    ref_station_id: str,
+    name2ll: dict,
+    eve_lat: float,
+    eve_lon: float,
+    event_depth: float,
+    align_phase_name: str,
+    t_ref,
+):
+    """Run alignment stages and return all products needed by plotting/output."""
+    # ---- Common length / sampling rate ----
+    npts = min(tr.stats.npts for tr in st_comp)
+    sample_rate = float(st_comp[0].stats.sampling_rate)
+    ref = ref_trace.data[:npts]
+    move_limit_samples = int(round(move_limit_sec * sample_rate))
+    print(f"    sample_rate = {sample_rate:.1f} Hz")
+
+    # ---- Correlation window indices ----
+    t0 = float(t_ref) if t_ref is not None else 0.0
+    center_time = t0
+    win_start = int(max(0, sample_rate * ((center_time - start_time) - win_pre)))
+    win_end = int(min(npts, sample_rate * ((center_time - start_time) + win_post)))
+
+    # ---- Normalize per trace using only the correlation window ----
+    for tr in st_comp:
+        win = tr.data[win_start:win_end]
+        mx = np.max(np.abs(win)) if win.size > 0 else 0.0
+        if mx > 0:
+            tr.data = tr.data / mx
+
+    # ---- Theoretical (TauP) shift per station relative to reference station ----
+    calc_shifts = {}
+    if t_ref is not None:
+        phase_key = align_phase_name.upper()
+        _taup_wall_start = time.perf_counter()
+        _taup_cpu_start = time.process_time()
+        for tr in st_comp:
+            station_id = str(tr.stats.station)
+            dist_deg = float(tr.stats.dist_deg)
+
+            tts_sta = model.get_travel_times(
+                source_depth_in_km=event_depth,
+                distance_in_degree=dist_deg,
+                phase_list=[phase_key.lower(), phase_key.upper()],
+            )
+            t_sta = None
+            for tt in reversed(tts_sta):
+                if tt.phase.name.upper() == phase_key:
+                    t_sta = float(tt.time)
+                    break
+
+            if t_sta is not None:
+                calc_shifts[station_id] = t_sta - t_ref
+        add_stage_timing("taup_station_shifts", _taup_wall_start, _taup_cpu_start)
+
+    # ===================== Stage 1: align to reference -> aligned_stack =====================
+    aligned_stack = np.zeros(npts)
+    _stage1_wall_start = time.perf_counter()
+    _stage1_cpu_start = time.process_time()
+    for tr in st_comp:
+        d = tr.data[:npts]
+        lag0 = 0
+        rolled = shift_left_zeropad(d, lag0)
+
+        # Stage-1 alignment: include TauP expected shift + correlation correction
+        station_id = str(tr.stats.station)
+        if station_id in calc_shifts:
+            expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
+            rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
+            lag1 = expected_shift_samples + compute_lag(
+                ref, rolled_expected, win_start, win_end, move_limit_samples
+            )
+        else:
+            lag1 = lag0 + compute_lag(
+                ref, rolled, win_start, win_end, move_limit_samples
+            )
+
+        aligned_stack += shift_left_zeropad(d, lag1)
+    add_stage_timing("align_stage1", _stage1_wall_start, _stage1_cpu_start)
+
+    win = aligned_stack[win_start:win_end]
+    mx = np.max(np.abs(win)) if win.size > 0 else 0.0
+    if mx > 0:
+        aligned_stack = aligned_stack / mx
+
+    # ===================== Stage 2: align to aligned_stack -> select traces =====================
+    selected_aligned_stack = np.zeros(npts)
+    selected_ids = set()
+    station_corr = {}
+    n_pass_window = 0
+    pass_window_ids = set()
+    snippet_by_station = {}
+
+    _stage2_wall_start = time.perf_counter()
+    _stage2_cpu_start = time.process_time()
+    for tr in st_comp:
+        d = tr.data[:npts]
+        station_id = str(tr.stats.station)
+
+        lag0 = 0
+        rolled = shift_left_zeropad(d, lag0)
+
+        # Stage-2 alignment: include TauP expected shift + correlation correction
+        if station_id in calc_shifts:
+            expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
+            rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
+            lag2 = expected_shift_samples + compute_lag(
+                aligned_stack,
+                rolled_expected,
+                win_start,
+                win_end,
+                move_limit_samples,
+            )
+        else:
+            lag2 = lag0 + compute_lag(
+                aligned_stack, rolled, win_start, win_end, move_limit_samples
+            )
+
+        aligned_data = shift_left_zeropad(d, lag2)
+        ref_window = aligned_stack[win_start:win_end]
+        aligned_window = aligned_data[win_start:win_end]
+        snippet_by_station[station_id] = aligned_window.copy()
+
+        if np.linalg.norm(aligned_window) == 0 or np.linalg.norm(ref_window) == 0:
+            r_window = 0.0
+        else:
+            r_window = float(
+                np.dot(aligned_window, ref_window)
+                / (np.linalg.norm(aligned_window) * np.linalg.norm(ref_window))
+            )
+
+        if r_window >= r_window_min:
+            n_pass_window += 1
+            pass_window_ids.add(station_id)
+
+        station_corr[station_id] = r_window
+
+        if r_window >= r_window_min:
+            selected_aligned_stack += aligned_data
+            selected_ids.add(station_id)
+        else:
+            print(f"    Rejected {station_id}: r_win={r_window:.2f}")
+    add_stage_timing("align_stage2_screen", _stage2_wall_start, _stage2_cpu_start)
+
+    win = selected_aligned_stack[win_start:win_end]
+    mx = np.max(np.abs(win)) if win.size > 0 else 0.0
+    if mx > 0:
+        selected_aligned_stack = selected_aligned_stack / mx
+
+    # ===================== Final alignment for plotting (lag3 to reference) =====================
+    selected_rows = []  # (dist_km, station_id, y_aligned_norm)
+    rejected_rows = []
+    aligned_bank = []
+    aligned_bank_all = []
+    station_shifts = {}
+    aligned_traces_by_station = {}
+
+    _stage3_wall_start = time.perf_counter()
+    _stage3_cpu_start = time.process_time()
+    for tr in st_comp:
+        x = tr.data[:npts]
+        station_id = str(tr.stats.station)
+
+        # Final alignment keeps x-axis on the reference station time base.
+        if station_id == ref_station_id:
+            lag3 = 0
+            y = x.copy()
+        else:
+            if station_id in calc_shifts:
+                expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
+                x_expected = shift_left_zeropad(x, expected_shift_samples)
+                lag_delta = compute_lag(
+                    ref, x_expected, win_start, win_end, move_limit_samples
+                )
+                lag3 = expected_shift_samples + lag_delta
+            else:
+                lag3 = compute_lag(ref, x, win_start, win_end, move_limit_samples)
+            y = shift_left_zeropad(x, lag3)
+
+        station_shifts[station_id] = {
+            "lag_samples": lag3,
+            "lag_seconds": lag3 / sample_rate,
+        }
+
+        win = y[win_start:win_end]
+        my = np.max(np.abs(win)) if win.size > 0 else 1.0
+        if my > 0:
+            y = y / my
+
+        aligned_traces_by_station[station_id] = y.copy()
+        aligned_bank_all.append(y)
+
+        slat, slon = name2ll[station_id]
+        dist_m, _, _ = gps2dist_azimuth(eve_lat, eve_lon, slat, slon)
+        dist_km = dist_m / 1000.0
+
+        if station_id in selected_ids:
+            selected_rows.append((dist_km, station_id, y))
+            aligned_bank.append(y)
+        else:
+            rejected_rows.append((dist_km, station_id, y))
+    add_stage_timing("align_stage3_finalize", _stage3_wall_start, _stage3_cpu_start)
+
+    selected_rows.sort(key=lambda t: t[0])
+    rejected_rows.sort(key=lambda t: t[0])
+    print(
+        f"    Final lag3 traces: selected={len(selected_rows)}, "
+        f"rejected={len(rejected_rows)}, total={len(selected_rows) + len(rejected_rows)}"
+    )
+
+    # ---- Time axis (seconds since origin) ----
+    t_abs = start_time + (np.arange(npts) / sample_rate)
+    mask = (t_abs >= start_time) & (t_abs <= end_time)
+
+    # ---- Final stack (normalized) ----
+    bank = aligned_bank_all
+    if len(bank) > 0:
+        stack_vec = np.mean(np.vstack(bank), axis=0)
+        win = stack_vec[win_start:win_end]
+        ms = np.max(np.abs(win)) if win.size > 0 else 1.0
+        if ms > 0:
+            stack_vec = stack_vec / ms
+    else:
+        stack_vec = np.zeros_like(t_abs)
+
+    return {
+        "npts": npts,
+        "sample_rate": sample_rate,
+        "move_limit_samples": move_limit_samples,
+        "win_start": win_start,
+        "win_end": win_end,
+        "calc_shifts": calc_shifts,
+        "aligned_stack": aligned_stack,
+        "selected_aligned_stack": selected_aligned_stack,
+        "selected_ids": selected_ids,
+        "station_corr": station_corr,
+        "n_pass_window": n_pass_window,
+        "pass_window_ids": pass_window_ids,
+        "snippet_by_station": snippet_by_station,
+        "ref_window": ref_window,
+        "selected_rows": selected_rows,
+        "rejected_rows": rejected_rows,
+        "station_shifts": station_shifts,
+        "aligned_traces_by_station": aligned_traces_by_station,
+        "t_abs": t_abs,
+        "mask": mask,
+        "stack_vec": stack_vec,
+    }
+
 # ===================== Channel / component selection =====================
 # User-facing components: Z, R, T
 channels, process_as_three_comp, sel_comp_list = get_component_selection(
@@ -248,136 +1021,24 @@ for idx, channel in enumerate(channels):
         print(f"==========Processing event {eve_id}===========")
 
         # ---- Read event info ----
-        eve_info = pd.read_csv(info_root / "catalog_20220930_8events.csv")
-        row = eve_info.loc[eve_info["evid"] == eve_id].iloc[0]
-
-        event_depth = float(row["depth"])
-        eve_lat, eve_lon = float(row["latitude"]), float(row["longitude"])
-        origin = UTCDateTime(str(row["origin_time"]))
-
-        save_path = Path(path_prefix + "output")
-        save_dir = save_path / eve_id
-        save_dir.mkdir(parents=True, exist_ok=True)
-
-        # ---- Read station list ----
-        station_file = info_root / "stations.txt"
-        sta_info = np.genfromtxt(
-            station_file,
-            dtype=[("name", "U10"), ("lat", "f8"), ("lon", "f8")],
-            usecols=(0, 1, 2),
-            comments="#",
-        )
-        sta_name = np.array(
-            [s.decode() if hasattr(s, "decode") else s for s in sta_info["name"]]
-        )
-        sta_lat = sta_info["lat"]
-        sta_lon = sta_info["lon"]
-        name2ll = {sta_name[i]: (sta_lat[i], sta_lon[i]) for i in range(len(sta_name))}
+        event_depth, eve_lat, eve_lon, origin = load_event_metadata(eve_id, info_root)
+        save_dir = make_event_output_dir(path_prefix, eve_id)
+        name2ll = load_station_lookup(info_root)
 
         # ---- Read waveforms for all stations ----
-        use_horizontal_cache = (
-            process_as_three_comp
-            and channel == "DP2"
-            and eve_id in horizontal_window_cache
+        st_window, raw_limits_by_station = read_waveforms_for_event(
+            eve_id=eve_id,
+            channel=channel,
+            process_as_three_comp_mode=process_as_three_comp,
+            horizontal_window_cache=horizontal_window_cache,
+            horizontal_raw_limits_cache=horizontal_raw_limits_cache,
+            name2ll=name2ll,
+            eve_lat=eve_lat,
+            eve_lon=eve_lon,
+            origin=origin,
         )
-
-        if use_horizontal_cache:
-            st_window = horizontal_window_cache[eve_id].copy()
-            raw_limits_by_station = horizontal_raw_limits_cache.get(eve_id, {}).copy()
-            print("Reusing horizontal read cache for transverse component.")
-        else:
-            st_all = Stream()
-            stanum = 0
-            raw_limits_by_station = {}
-
-            _read_wall_start = time.perf_counter()
-            _read_cpu_start = time.process_time()
-            for sta, (slat, slon) in name2ll.items():
-                code_num = int(sta)
-                code_str = f"{code_num:05d}"
-
-                # If requested channel is horizontal, read both DP1 and DP2 (needed for rotation).
-                if channel in ["DP1", "DP2"]:
-                    chan_list_this_sta = ["DP1", "DP2"]
-                else:
-                    chan_list_this_sta = [channel]
-
-                # Epicentral distance
-                dist_deg = locations2degrees(eve_lat, eve_lon, slat, slon)
-                dist_km = degrees2kilometers(dist_deg)
-
-                first_chan_for_sta = True
-
-                for ch_read in chan_list_this_sta:
-                    fpath = (
-                        data_path
-                        / code_str
-                        / f"{ch_read}.D"
-                        / f"7V.{code_str}.00.{ch_read}.D.2022.273.{sps_rate}.mseed"
-                    )
-                    if verbose:
-                        if stanum % 20 == 0:
-                            print(f"Reading station {sta} channel {ch_read} from {fpath}")
-                    if not fpath.exists():
-                        if verbose:
-                            print("No such file")
-                        continue
-
-                    # Read only the requested time window to reduce I/O.
-                    st_win = read(
-                        str(fpath),
-                        starttime=origin + start_time,
-                        endtime=origin + end_time,
-                    )
-                    if len(st_win) == 0:
-                        continue
-                    tr = st_win[0]
-                    if sta not in raw_limits_by_station:
-                        raw_limits_by_station[sta] = (tr.stats.starttime, tr.stats.endtime)
-
-                    # Store metadata for later plotting/selection
-                    tr.stats.dist_km = dist_km
-                    tr.stats.dist_deg = dist_deg
-                    tr.stats.relatime = tr.times(reftime=origin)
-                    tr.stats.station = sta
-                    st_all.append(tr)
-
-                    # Count stations (once per station)
-                    if first_chan_for_sta:
-                        stanum += 1
-                        if stanum % 100 == 0:
-                            print(f"Event {eve_id}: processed {stanum} stations...")
-                        first_chan_for_sta = False
-            add_stage_timing("waveform_read_slice", _read_wall_start, _read_cpu_start)
-
-            # ---- Sort by distance ----
-            st_all.sort(keys=["dist_km"])
-            if not st_all:
-                print(f"No traces found for event {eve_id}, skip.")
-                continue
-
-            # (Reference travel times are computed after picking the reference station.)
-
-            # ---- Keep traces that cover [origin + start_time, origin + end_time] ----
-            st_window = Stream()
-            kept = 0
-
-            for tr in st_all:
-                # Keep the entire [start_time, end_time] record as long as it covers the plot window
-                if tr.stats.endtime >= origin + start_time and tr.stats.starttime <= origin + end_time:
-                    tr_i = tr.copy()
-                    if tr_i is not None and tr_i.stats.npts > 0:
-                        tr_i.stats.station = tr.stats.station
-                        st_window.append(tr_i)
-                        kept += 1
-
-            if kept == 0:
-                print("  No data in plot window (start_time to end_time).")
-                continue
-
-            if process_as_three_comp and channel == "DP1":
-                horizontal_window_cache[eve_id] = st_window.copy()
-                horizontal_raw_limits_cache[eve_id] = raw_limits_by_station.copy()
+        if st_window is None:
+            continue
 
         # Label to show on the figure
         plot_comp = sel_comp
@@ -431,86 +1092,16 @@ for idx, channel in enumerate(channels):
             st_comp = st_window.select(channel=channel)
 
         # ---- Auto-select reference station: closest to array center ----
-        st_comp.sort(keys=["dist_km"])
-        if len(st_comp) == 0:
+        ref_station_id, ref_trace = select_reference_trace(st_comp, name2ll)
+        if ref_trace is None:
             continue
-
-        station_ids = sorted({str(tr.stats.station) for tr in st_comp})
-        center_lats = [name2ll[s][0] for s in station_ids if s in name2ll]
-        center_lons = [name2ll[s][1] for s in station_ids if s in name2ll]
-
-        ref_station_id = None
-        if len(center_lats) > 0 and len(center_lons) > 0:
-            center_lat = float(np.mean(center_lats))
-            center_lon = float(np.mean(center_lons))
-            best_dist_m = None
-            for sid in station_ids:
-                if sid not in name2ll:
-                    continue
-                slat, slon = name2ll[sid]
-                dist_m, _, _ = gps2dist_azimuth(center_lat, center_lon, slat, slon)
-                if best_dist_m is None or dist_m < best_dist_m:
-                    best_dist_m = dist_m
-                    ref_station_id = sid
-
-        if ref_station_id is None:
-            ref_station_id = str(st_comp[0].stats.station)
-
-        ref_trace = st_comp.select(station=ref_station_id)
-        if len(ref_trace) == 0:
-            ref_trace = [st_comp[0]]
-            ref_station_id = str(ref_trace[0].stats.station)
-        ref_trace = ref_trace[0]
-
-        ref_trace_dur = float(ref_trace.stats.npts) / float(ref_trace.stats.sampling_rate)
-        print(
-            f"    Reference station (auto): {ref_station_id} (closest to array center)  "
-            f"dist_km={ref_trace.stats.dist_km:.2f}  dur_s={ref_trace_dur:.2f}"
-        )
-        print(f"    Epicentral distance ≈ {ref_trace.stats.dist_km:.1f} km")
-        ref_start = ref_trace.stats.starttime
-        ref_end = ref_trace.stats.endtime
-        ref_start_dt = ensure_utc_datetime(ref_start.datetime)
-        ref_end_dt = ensure_utc_datetime(ref_end.datetime)
-        print(
-            "\033[32m    Reference seismogram UTC window: "
-            f"{ref_start_dt.isoformat()} to {ref_end_dt.isoformat()}\033[0m"
-        )
-        if ref_station_id in raw_limits_by_station:
-            raw_start, raw_end = raw_limits_by_station[ref_station_id]
-            raw_start_dt = ensure_utc_datetime(raw_start.datetime)
-            raw_end_dt = ensure_utc_datetime(raw_end.datetime)
-            print(
-                "\033[32m    Reference read UTC window: "
-                f"{raw_start_dt.isoformat()} to {raw_end_dt.isoformat()}\033[0m"
-            )
+        print_reference_summary(ref_station_id, ref_trace, raw_limits_by_station)
 
         # ---- Theoretical travel times (reference station) ----
-        ref_deg = float(ref_trace.stats.dist_deg)
-        tts = model.get_travel_times(
-            source_depth_in_km=event_depth,
-            distance_in_degree=ref_deg,
-            phase_list=["p", "P", "s", "S"],
+        p_traveltime, s_traveltime, p_arrival_time, s_arrival_time, phase_traveltime = compute_phase_travel_times(
+            model, event_depth, ref_trace, origin, align_phase
         )
-
-        p_traveltime = None
-        s_traveltime = None
-        p_arrival_time = None
-        s_arrival_time = None
-
-        for tt in reversed(tts):
-            if tt.phase.name.upper() == "P":
-                p_traveltime = float(tt.time)
-                p_arrival_time = origin + p_traveltime
-            if tt.phase.name.upper() == "S":
-                s_traveltime = float(tt.time)
-                s_arrival_time = origin + s_traveltime
-
-        if align_phase == "P" and p_traveltime is not None:
-            phase_traveltime = float(p_traveltime)  # seconds since origin
-        elif align_phase == "S" and s_traveltime is not None:
-            phase_traveltime = float(s_traveltime)
-        else:
+        if phase_traveltime is None:
             print("    No valid phase for alignment. Skip array.")
             continue
         # Theoretical arrival time (reference station) used for reference in shift calculations/plots
@@ -538,416 +1129,111 @@ for idx, channel in enumerate(channels):
             )
         add_stage_timing("preprocess_filter", _pre_wall_start, _pre_cpu_start)
 
-        # ---- Common length / sampling rate ----
-        npts = min(tr.stats.npts for tr in st_comp)
-        sample_rate = float(st_comp[0].stats.sampling_rate)
-        ref = ref_trace.data[:npts]
-        move_limit_samples = int(round(move_limit_sec * sample_rate))
-        print(f"    sample_rate = {sample_rate:.1f} Hz")
-
-        # ---- Correlation window indices ----
-        t0 = float(phase_traveltime) if phase_traveltime is not None else 0.0
-
-        # Correlation window centered at (theoretical arrival)
-        center_time = t0
-        win_start = int(max(0, sample_rate * ((center_time - start_time) - win_pre)))
-        win_end = int(min(npts, sample_rate * ((center_time - start_time) + win_post)))
-
-        # ---- Normalize per trace using only the correlation window ----
-        for tr in st_comp:
-            win = tr.data[win_start:win_end]
-            mx = np.max(np.abs(win)) if win.size > 0 else 0.0
-            if mx > 0:
-                tr.data = tr.data / mx
-
-        # ---- Theoretical (TauP) shift per station relative to reference station ----
-        calc_shifts = {}
-        if t_ref is not None:
-            phase_key = align_phase.upper()
-            _taup_wall_start = time.perf_counter()
-            _taup_cpu_start = time.process_time()
-            for tr in st_comp:
-                station_id = str(tr.stats.station)
-                dist_deg = float(tr.stats.dist_deg)
-
-                tts_sta = model.get_travel_times(
-                    source_depth_in_km=event_depth,
-                    distance_in_degree=dist_deg,
-                    phase_list=[phase_key.lower(), phase_key.upper()],
-                )
-                t_sta = None
-                for tt in reversed(tts_sta):
-                    if tt.phase.name.upper() == phase_key:
-                        t_sta = float(tt.time)
-                        break
-
-                if t_sta is not None:
-                    calc_shifts[station_id] = t_sta - t_ref
-            add_stage_timing("taup_station_shifts", _taup_wall_start, _taup_cpu_start)
-
-        # ===================== Stage 1: align to reference -> aligned_stack =====================
-        aligned_stack = np.zeros(npts)
-        _stage1_wall_start = time.perf_counter()
-        _stage1_cpu_start = time.process_time()
-        for tr in st_comp:
-            d = tr.data[:npts]
-            lag0 = 0
-            rolled = shift_left_zeropad(d, lag0)
-
-            # Stage-1 alignment: include TauP expected shift + correlation correction
-            station_id = str(tr.stats.station)
-            if station_id in calc_shifts:
-                expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
-                rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
-                lag1 = expected_shift_samples + compute_lag(
-                    ref, rolled_expected, win_start, win_end
-                )
-            else:
-                lag1 = lag0 + compute_lag(ref, rolled, win_start, win_end)
-
-            aligned_stack += shift_left_zeropad(d, lag1)
-        add_stage_timing("align_stage1", _stage1_wall_start, _stage1_cpu_start)
-
-        win = aligned_stack[win_start:win_end]
-        mx = np.max(np.abs(win)) if win.size > 0 else 0.0
-        if mx > 0:
-            aligned_stack = aligned_stack / mx
-
-        # ===================== Stage 2: align to aligned_stack -> select traces =====================
-        selected_aligned_stack = np.zeros(npts)
-        selected_ids = set()
-        station_corr = {}
-        n_pass_window = 0
-        pass_window_ids = set()
-        snippet_by_station = {}
-
-        _stage2_wall_start = time.perf_counter()
-        _stage2_cpu_start = time.process_time()
-        for tr in st_comp:
-            d = tr.data[:npts]
-            station_id = str(tr.stats.station)
-
-            lag0 = 0
-            rolled = shift_left_zeropad(d, lag0)
-
-            # Stage-2 alignment: include TauP expected shift + correlation correction
-            if station_id in calc_shifts:
-                expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
-                rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
-                lag2 = expected_shift_samples + compute_lag(
-                    aligned_stack, rolled_expected, win_start, win_end
-                )
-            else:
-                lag2 = lag0 + compute_lag(aligned_stack, rolled, win_start, win_end)
-
-            aligned_data = shift_left_zeropad(d, lag2)
-            ref_window = aligned_stack[win_start:win_end]
-            aligned_window = aligned_data[win_start:win_end]
-            snippet_by_station[station_id] = aligned_window.copy()
-
-            if np.linalg.norm(aligned_window) == 0 or np.linalg.norm(ref_window) == 0:
-                r_window = 0.0
-            else:
-                r_window = float(
-                    np.dot(aligned_window, ref_window)
-                    / (np.linalg.norm(aligned_window) * np.linalg.norm(ref_window))
-                )
-
-            if r_window >= r_window_min:
-                n_pass_window += 1
-                pass_window_ids.add(station_id)
-
-            station_corr[station_id] = r_window
-
-            if r_window >= r_window_min:
-                selected_aligned_stack += aligned_data
-                selected_ids.add(station_id)
-            else:
-                print(f"    Rejected {station_id}: r_win={r_window:.2f}")
-        add_stage_timing("align_stage2_screen", _stage2_wall_start, _stage2_cpu_start)
-
-        win = selected_aligned_stack[win_start:win_end]
-        mx = np.max(np.abs(win)) if win.size > 0 else 0.0
-        if mx > 0:
-            selected_aligned_stack = selected_aligned_stack / mx
-
-        # ===================== Final alignment for plotting (lag3 to reference) =====================
-        selected_rows = []  # (dist_km, station_id, y_aligned_norm)
-        rejected_rows = []
-
-        aligned_bank = []
-        aligned_bank_all = []
-        station_shifts = {}  # Track shifts for each station
-        aligned_traces_by_station = {}  # station_id -> final aligned & normalized trace (for later stacking)
-
-        _stage3_wall_start = time.perf_counter()
-        _stage3_cpu_start = time.process_time()
-        for tr in st_comp:
-            x = tr.data[:npts]
-            station_id = str(tr.stats.station)
-
-            # Final alignment: align every trace to the reference station so the x-axis remains
-            # the reference station's time since origin.
-            if station_id == ref_station_id:
-                lag3 = 0
-                y = x.copy()
-            else:
-                if station_id in calc_shifts:
-                    expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
-                    x_expected = shift_left_zeropad(x, expected_shift_samples)
-                    lag_delta = compute_lag(ref, x_expected, win_start, win_end)
-                    lag3 = expected_shift_samples + lag_delta
-                else:
-                    lag3 = compute_lag(ref, x, win_start, win_end)
-                y = shift_left_zeropad(x, lag3)
-
-            # Store shift (in samples and seconds)
-            station_shifts[station_id] = {
-                'lag_samples': lag3,
-                'lag_seconds': lag3 / sample_rate
-            }
-
-            # Per-trace normalization for plotting/stacking (correlation window only)
-            win = y[win_start:win_end]
-            my = np.max(np.abs(win)) if win.size > 0 else 1.0
-            if my > 0:
-                y = y / my
-
-            # Store for later stacking by station
-            aligned_traces_by_station[station_id] = y.copy()
-
-            aligned_bank_all.append(y)
-
-            # Epicentral distance (km)
-            slat, slon = name2ll[station_id]
-            dist_m, _, _ = gps2dist_azimuth(eve_lat, eve_lon, slat, slon)
-            dist_km = dist_m / 1000.0
-
-            if station_id in selected_ids:
-                selected_rows.append((dist_km, station_id, y))
-                aligned_bank.append(y)
-            else:
-                rejected_rows.append((dist_km, station_id, y))
-        add_stage_timing("align_stage3_finalize", _stage3_wall_start, _stage3_cpu_start)
-
-
-        selected_rows.sort(key=lambda t: t[0])
-        rejected_rows.sort(key=lambda t: t[0])
-        print(
-            f"    Final lag3 traces: selected={len(selected_rows)}, "
-            f"rejected={len(rejected_rows)}, total={len(selected_rows) + len(rejected_rows)}"
+        alignment = compute_alignment_products(
+            st_comp=st_comp,
+            ref_trace=ref_trace,
+            ref_station_id=ref_station_id,
+            name2ll=name2ll,
+            eve_lat=eve_lat,
+            eve_lon=eve_lon,
+            event_depth=event_depth,
+            align_phase_name=align_phase,
+            t_ref=t_ref,
         )
-
-        # ---- Time axis (seconds since origin) ----
-        t_abs = start_time + (np.arange(npts) / sample_rate)
-        mask = (t_abs >= start_time) & (t_abs <= end_time)
-
-        # ---- Final stack (normalized) ----
-        bank = aligned_bank_all
-        if len(bank) > 0:
-            stack_vec = np.mean(np.vstack(bank), axis=0)
-            win = stack_vec[win_start:win_end]
-            ms = np.max(np.abs(win)) if win.size > 0 else 1.0
-            if ms > 0:
-                stack_vec = stack_vec / ms
-        else:
-            stack_vec = np.zeros_like(t_abs)
+        npts = alignment["npts"]
+        sample_rate = alignment["sample_rate"]
+        move_limit_samples = alignment["move_limit_samples"]
+        win_start = alignment["win_start"]
+        win_end = alignment["win_end"]
+        calc_shifts = alignment["calc_shifts"]
+        aligned_stack = alignment["aligned_stack"]
+        selected_aligned_stack = alignment["selected_aligned_stack"]
+        selected_ids = alignment["selected_ids"]
+        station_corr = alignment["station_corr"]
+        n_pass_window = alignment["n_pass_window"]
+        pass_window_ids = alignment["pass_window_ids"]
+        snippet_by_station = alignment["snippet_by_station"]
+        ref_window = alignment["ref_window"]
+        selected_rows = alignment["selected_rows"]
+        rejected_rows = alignment["rejected_rows"]
+        station_shifts = alignment["station_shifts"]
+        aligned_traces_by_station = alignment["aligned_traces_by_station"]
+        t_abs = alignment["t_abs"]
+        mask = alignment["mask"]
+        stack_vec = alignment["stack_vec"]
 
         # ---- Plot: superposition of Stage1/Stage2/Final stacks ----
         _plot_wall_start = time.perf_counter()
         _plot_cpu_start = time.process_time()
         if not all_channels:
-            fig_stk, ax_stk = plt.subplots(1, 1, figsize=(10, 3.8))
-            set_figure_title(fig_stk, f"{eve_id} {plot_comp} stage stacks")
-            ax_stk.plot(t_abs[mask], aligned_stack[mask], color='C0', lw=2, label='Stage 1: aligned_stack')
-            ax_stk.plot(t_abs[mask], selected_aligned_stack[mask], color='C1', lw=2, label='Stage 2: selected_aligned_stack')
-            ax_stk.plot(t_abs[mask], stack_vec[mask], color='C3', lw=2.2, label='Final stack')
-            ax_stk.axhline(0.0, color='k', lw=0.6, alpha=0.6)
-            ax_stk.set_xlim(start_time, end_time)
-            ax_stk.set_ylim(-1.1, 1.1)
-            ax_stk.grid(alpha=0.2)
-            ax_stk.set_xlabel('Time since origin (s)')
-            ax_stk.set_ylabel('Stack (norm.)')
-            ax_stk.set_title(f"Event {eve_id} {plot_comp}: Stage-1/Stage-2/Final stacks")
-            ax_stk.legend(loc='upper right', fontsize=9)
-            plt.tight_layout()
-            stack_file = save_dir / f"{eve_id}_{plot_comp}_stage_stacks_{align_phase}.png"
-            fig_stk.savefig(stack_file, dpi=300, bbox_inches='tight')
-            print(f"✓ Stage stacks plot saved to: {stack_file}")
+            plot_stage_stacks(
+                eve_id=eve_id,
+                plot_comp=plot_comp,
+                align_phase_name=align_phase,
+                t_abs=t_abs,
+                mask=mask,
+                aligned_stack=aligned_stack,
+                selected_aligned_stack=selected_aligned_stack,
+                stack_vec=stack_vec,
+                save_dir=save_dir,
+            )
 
         # ---- Plot: record section (top) + stack (bottom) ----
-        record_fig = None
-        if show_record_section_plot:
-            fig, (ax, ax2) = plt.subplots(
-                2,
-                1,
-                figsize=(10, 9),
-                sharex=False,
-                gridspec_kw={"height_ratios": [3, 1]},
-            )
-            record_fig = fig
-            set_figure_title(fig, f"{eve_id} {plot_comp} aligned record section")
-
-        all_rows = selected_rows + rejected_rows
-        all_rows.sort(key=lambda t: t[0])
-
-        t_masked = t_abs[mask]
-        if show_record_section_plot and len(all_rows) > 0 and np.any(mask):
-            A = np.vstack([row[2][mask] for row in all_rows])
-            dvec = np.array([row[0] for row in all_rows], dtype=float)
-
-            # y-edges for irregular station spacing
-            if len(dvec) == 1:
-                y_edges = np.array([dvec[0] - 0.5, dvec[0] + 0.5])
-            else:
-                mids = 0.5 * (dvec[1:] + dvec[:-1])
-                y_edges = np.empty(len(dvec) + 1)
-                y_edges[1:-1] = mids
-                y_edges[0] = dvec[0] - (mids[0] - dvec[0])
-                y_edges[-1] = dvec[-1] + (dvec[-1] - mids[-1])
-
-            # t-edges for pcolormesh
-            if len(t_masked) == 1:
-                t_edges = np.array(
-                    [t_masked[0] - 0.5 / sample_rate, t_masked[0] + 0.5 / sample_rate]
-                )
-            else:
-                tmids = 0.5 * (t_masked[1:] + t_masked[:-1])
-                t_edges = np.empty(len(t_masked) + 1)
-                t_edges[1:-1] = tmids
-                t_edges[0] = t_masked[0] - (tmids[0] - t_masked[0])
-                t_edges[-1] = t_masked[-1] + (t_masked[-1] - tmids[-1])
-
-            ax.pcolormesh(
-                t_edges,
-                y_edges,
-                A,
-                cmap="gray",
-                shading="auto",
-                vmin=-1.0,
-                vmax=1.0,
-            )
-
-        if show_record_section_plot:
-            ax.set_xlim(start_time, end_time)
-            ax.set_xlabel("Time since origin (s)")
-            ax.set_ylabel("Epicentral distance (km)")
-            ax.set_title(f"Aligned {align_phase} waveforms Event {eve_id} comp = {plot_comp}")
-            ax.grid(alpha=0.2)
-
-        # Theoretical arrival time (reference station) as a vertical reference line
-        if show_record_section_plot:
-            try:
-                if t_ref is not None:
-                    for axi in (ax, ax2):
-                        axi.axvline(x=t_ref, color="k", lw=3, alpha=0.5, zorder=6)
-            except Exception as e:
-                print(f"    [WARN] Failed to draw vertical reference arrival for {align_phase}: {e}")
-
-        # Cross-correlation window bounds as vertical yellow lines
-        if show_record_section_plot:
-            try:
-                for axi in (ax, ax2):
-                    draw_correlation_markers(
-                        axi,
-                        start_time,
-                        win_start,
-                        win_end,
-                        sample_rate,
-                        move_limit_sec,
-                        npts,
-                    )
-            except Exception as e:
-                print(f"    [WARN] Failed to draw correlation window bounds: {e}")
-
-        # Legend for window bounds
-        if show_record_section_plot:
-            try:
-                t_win_start, t_win_end, _, _ = correlation_time_bounds(
-                    start_time,
-                    win_start,
-                    win_end,
-                    sample_rate,
-                    move_limit_sec,
-                    npts,
-                )
-                legend_handles = [
-                    Line2D([0], [0], color='y', lw=2, label='Correlation window'),
-                    Line2D([0], [0], color='g', lw=2, label='Correlation search (±move_limit_sec)'),
-                    Line2D([0], [0], color='none', label=f'Pass r_win: {n_pass_window}'),
-                ]
-                ax.legend(
-                    handles=legend_handles,
-                    loc='upper left',
-                    bbox_to_anchor=(1.02, 1.0),
-                    borderaxespad=0.0,
-                    fontsize=9,
-                )
-            except Exception as e:
-                print(f"    [WARN] Failed to add legend: {e}")
-
-        # Bottom panel: normalized stack
-        if show_record_section_plot:
-            ax2.plot(t_abs[mask], stack_vec[mask], color="C3", lw=1.5)
-            ax2.axhline(0.0, color="k", lw=0.6)
-            ax2.set_xlim(start_time, end_time)
-            ax2.set_xlabel("Time since origin (s)")
-            ax2.set_ylabel("Stack (norm.)")
-            ax2.set_ylim(-1.1, 1.1)
-            ax2.set_title("Final stack uses ALL traces (no screening)")
-            ax2.grid(alpha=0.2)
-
-            plt.tight_layout()
-            record_file = save_dir / f"{eve_id}_{plot_comp}_{align_phase}.png"
-            record_fig.savefig(record_file, dpi=300, bbox_inches="tight")
-            print(f"✓ Record-section plot saved to: {record_file}")
+        record_fig = plot_record_section_and_stack(
+            show_record=show_record_section_plot,
+            eve_id=eve_id,
+            plot_comp=plot_comp,
+            align_phase_name=align_phase,
+            selected_rows=selected_rows,
+            rejected_rows=rejected_rows,
+            t_abs=t_abs,
+            mask=mask,
+            sample_rate=sample_rate,
+            t_ref=t_ref,
+            win_start=win_start,
+            win_end=win_end,
+            move_sec=move_limit_sec,
+            npts=npts,
+            n_pass_window=n_pass_window,
+            stack_vec=stack_vec,
+            save_dir=save_dir,
+        )
 
         # Store data for three-component plotting or show individual plot
         if process_as_three_comp:
-            # Determine component name
-            if channel == "DPZ":
-                comp_key = "DPZ"
-            elif sel_comp == "R":
-                comp_key = "R"
-            elif sel_comp == "T":
-                comp_key = "T"
-            else:
-                comp_key = channel
-            
-            # Store data
-            all_component_data[comp_key] = {
-                'fig': record_fig,
-                'all_rows': [(r[0], r[1], r[2].copy()) for r in (selected_rows + rejected_rows)],
-                'stack_vec': stack_vec.copy(),
-                't_abs': t_abs.copy(),
-                'mask': mask.copy(),
-                'sample_rate': sample_rate,
-                'win_start': win_start,
-                'win_end': win_end,
-                'move_limit_sec': move_limit_sec,
-                'move_limit_samples': move_limit_samples,
-                'npts': npts,
-                'start_time': start_time,
-                'end_time': end_time,
-                'eve_id': eve_id,
-                'align_phase': align_phase,
-                'origin': origin,
-                'station_shifts': station_shifts.copy(),
-                'station_corr': station_corr.copy(),
-                'calc_shifts': calc_shifts.copy(),
-                'n_pass_window': int(n_pass_window),
-                'pass_window_ids': sorted(list(pass_window_ids), key=lambda s: int(s)),
-                'snippet_by_station': {k: v.copy() for k, v in snippet_by_station.items()},
-                'ref_window': ref_window.copy(),
-                'p_traveltime': None if p_traveltime is None else float(p_traveltime),
-                's_traveltime': None if s_traveltime is None else float(s_traveltime),
-                'station_ll': {k: (float(v[0]), float(v[1])) for k, v in name2ll.items()},
-                # Stations that passed Stage-2 screening for this component
-                'selected_ids': sorted(list(selected_ids), key=lambda s: int(s)),
-                'aligned_traces_by_station': {k: v.copy() for k, v in aligned_traces_by_station.items()},
-            }
-            # Store t_ref
-            all_component_data[comp_key]['t_ref'] = t_ref
+            comp_key = resolve_component_key(channel, sel_comp)
+            all_component_data[comp_key] = build_component_output_payload(
+                record_fig=record_fig,
+                selected_rows=selected_rows,
+                rejected_rows=rejected_rows,
+                stack_vec=stack_vec,
+                t_abs=t_abs,
+                mask=mask,
+                sample_rate=sample_rate,
+                win_start=win_start,
+                win_end=win_end,
+                move_limit_sec_value=move_limit_sec,
+                move_limit_samples=move_limit_samples,
+                npts=npts,
+                start_t=start_time,
+                end_t=end_time,
+                eve_id=eve_id,
+                align_phase_name=align_phase,
+                origin=origin,
+                station_shifts=station_shifts,
+                station_corr=station_corr,
+                calc_shifts=calc_shifts,
+                n_pass_window=n_pass_window,
+                pass_window_ids=pass_window_ids,
+                snippet_by_station=snippet_by_station,
+                ref_window=ref_window,
+                p_traveltime=p_traveltime,
+                s_traveltime=s_traveltime,
+                name2ll=name2ll,
+                selected_ids=selected_ids,
+                aligned_traces_by_station=aligned_traces_by_station,
+                t_ref=t_ref,
+            )
             
             if record_fig is not None:
                 plt.close(record_fig)  # Close individual figure
@@ -987,25 +1273,7 @@ for idx, channel in enumerate(channels):
 
                     if origin is not None:
                         try:
-                            origin_dt_utc = origin.datetime
-                            if origin_dt_utc.tzinfo is None:
-                                origin_dt_utc = origin_dt_utc.replace(tzinfo=timezone.utc)
-                            ax_time = ax_env.twiny()
-                            ax_time.set_xlim(ax_env.get_xlim())
-                            ax_time.xaxis.set_label_position('bottom')
-                            ax_time.xaxis.set_ticks_position('bottom')
-                            ax_time.spines['bottom'].set_position(('outward', 36))
-                            ax_time.spines['top'].set_visible(False)
-
-                            ticks = ax_env.get_xticks()
-                            labels = [
-                                (origin_dt_utc + timedelta(seconds=float(t))).astimezone(timezone.utc).strftime('%H:%M:%S')
-                                for t in ticks
-                            ]
-                            ax_time.set_xticks(ticks)
-                            ax_time.set_xticklabels(labels)
-                            date_str = origin_dt_utc.date().isoformat()
-                            ax_time.set_xlabel(f'UTC time ({date_str})', fontsize=10)
+                            add_utc_time_axis(ax_env, origin)
                         except Exception as e:
                             print(f"[WARN] Failed to add UTC time axis (single envelope): {e}")
 
@@ -1454,25 +1722,7 @@ if process_as_three_comp and len(all_component_data) == 3:
 
             if origin_env is not None:
                 try:
-                    origin_dt_utc = origin_env.datetime
-                    if origin_dt_utc.tzinfo is None:
-                        origin_dt_utc = origin_dt_utc.replace(tzinfo=timezone.utc)
-                    ax_time = ax_env.twiny()
-                    ax_time.set_xlim(ax_env.get_xlim())
-                    ax_time.xaxis.set_label_position('bottom')
-                    ax_time.xaxis.set_ticks_position('bottom')
-                    ax_time.spines['bottom'].set_position(('outward', 36))
-                    ax_time.spines['top'].set_visible(False)
-
-                    ticks = ax_env.get_xticks()
-                    labels = [
-                        (origin_dt_utc + timedelta(seconds=float(t))).astimezone(timezone.utc).strftime('%H:%M:%S')
-                        for t in ticks
-                    ]
-                    ax_time.set_xticks(ticks)
-                    ax_time.set_xticklabels(labels)
-                    date_str = origin_dt_utc.date().isoformat()
-                    ax_time.set_xlabel(f'UTC time ({date_str})', fontsize=10)
+                    add_utc_time_axis(ax_env, origin_env)
                 except Exception as e:
                     print(f"[WARN] Failed to add UTC time axis (envelope): {e}")
 
@@ -1557,25 +1807,7 @@ if process_as_three_comp and len(all_component_data) == 3:
             try:
                 origin_utc = data.get('origin')
                 if origin_utc is not None:
-                    origin_dt_utc = origin_utc.datetime
-                    if origin_dt_utc.tzinfo is None:
-                        origin_dt_utc = origin_dt_utc.replace(tzinfo=timezone.utc)
-                    ax_time = axc.twiny()
-                    ax_time.set_xlim(axc.get_xlim())
-                    ax_time.xaxis.set_label_position('bottom')
-                    ax_time.xaxis.set_ticks_position('bottom')
-                    ax_time.spines['bottom'].set_position(('outward', 36))
-                    ax_time.spines['top'].set_visible(False)
-
-                    ticks = axc.get_xticks()
-                    labels = [
-                        (origin_dt_utc + timedelta(seconds=float(t))).astimezone(utc_tz).strftime('%H:%M:%S')
-                        for t in ticks
-                    ]
-                    ax_time.set_xticks(ticks)
-                    ax_time.set_xticklabels(labels)
-                    date_str = origin_dt_utc.date().isoformat()
-                    ax_time.set_xlabel(f'UTC time ({date_str})', fontsize=10)
+                    add_utc_time_axis(axc, origin_utc, tick_tz=utc_tz)
             except Exception as e:
                 print(f"[WARN] Failed to add UTC time axis: {e}")
 
