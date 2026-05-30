@@ -1,9 +1,57 @@
 from __future__ import annotations
 
 from datetime import timedelta, timezone
+from dataclasses import dataclass, field
+import time
 
 import numpy as np
 from obspy import UTCDateTime
+
+
+@dataclass
+class TimingState:
+    start_cpu_time: float = field(default_factory=time.process_time)
+    start_wall_time: float = field(default_factory=time.perf_counter)
+    timing_reported: bool = False
+    stage_wall_times: dict[str, float] = field(default_factory=dict)
+    stage_cpu_times: dict[str, float] = field(default_factory=dict)
+    stage_counts: dict[str, int] = field(default_factory=dict)
+
+
+def add_stage_timing(state: TimingState, stage_name: str, wall_start: float, cpu_start: float) -> None:
+    """Accumulate elapsed wall/cpu time for a named processing stage."""
+    wall_dt = time.perf_counter() - wall_start
+    cpu_dt = time.process_time() - cpu_start
+    state.stage_wall_times[stage_name] = state.stage_wall_times.get(stage_name, 0.0) + wall_dt
+    state.stage_cpu_times[stage_name] = state.stage_cpu_times.get(stage_name, 0.0) + cpu_dt
+    state.stage_counts[stage_name] = state.stage_counts.get(stage_name, 0) + 1
+
+
+def report_stage_timing(state: TimingState) -> None:
+    """Print stage-level timing summary sorted by wall time."""
+    if not state.stage_wall_times:
+        return
+    total_wall = sum(state.stage_wall_times.values())
+    print("\033[36mStage timing breakdown (wall/cpu):\033[0m")
+    for name, wall_sec in sorted(state.stage_wall_times.items(), key=lambda kv: kv[1], reverse=True):
+        cpu_sec = state.stage_cpu_times.get(name, 0.0)
+        calls = state.stage_counts.get(name, 0)
+        frac = (100.0 * wall_sec / total_wall) if total_wall > 0 else 0.0
+        print(
+            f"  {name:<28} wall={wall_sec:7.2f}s  cpu={cpu_sec:7.2f}s  "
+            f"calls={calls:3d}  ({frac:5.1f}%)"
+        )
+
+
+def report_timing_once(state: TimingState) -> None:
+    """Report cpu and wall time before showing plots."""
+    if state.timing_reported:
+        return
+    cpu_sec = time.process_time() - state.start_cpu_time
+    wall_sec = time.perf_counter() - state.start_wall_time
+    print(f"\033[31mTiming: cpu={cpu_sec:.2f}s  wall={wall_sec:.2f}s\033[0m")
+    report_stage_timing(state)
+    state.timing_reported = True
 
 
 def compute_lag(

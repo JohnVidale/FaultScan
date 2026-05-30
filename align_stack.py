@@ -15,14 +15,17 @@ from scipy.signal.windows import gaussian
 
 from align_utils import (
     add_catalog_event_lines,
+    add_stage_timing,
     add_utc_time_axis,
     compute_lag,
     correlation_time_bounds,
     draw_correlation_markers,
     ensure_utc_datetime,
     get_component_selection,
+    report_timing_once,
     set_figure_title,
     shift_left_zeropad,
+    TimingState,
 )
 
 min_freq, max_freq            = 3.0, 10.0 # Bandpass filter (Hz)
@@ -59,37 +62,7 @@ show_record_section_plot = False  # Show aligned record sections (single + 3-com
 
 
 # Timing (cpu and wall)
-_start_cpu_time = time.process_time()
-_start_wall_time = time.perf_counter()
-_timing_reported = False
-_stage_wall_times = {}
-_stage_cpu_times = {}
-_stage_counts = {}
-
-
-def add_stage_timing(stage_name: str, wall_start: float, cpu_start: float) -> None:
-    """Accumulate elapsed wall/cpu time for a named processing stage."""
-    wall_dt = time.perf_counter() - wall_start
-    cpu_dt = time.process_time() - cpu_start
-    _stage_wall_times[stage_name] = _stage_wall_times.get(stage_name, 0.0) + wall_dt
-    _stage_cpu_times[stage_name] = _stage_cpu_times.get(stage_name, 0.0) + cpu_dt
-    _stage_counts[stage_name] = _stage_counts.get(stage_name, 0) + 1
-
-
-def report_stage_timing() -> None:
-    """Print stage-level timing summary sorted by wall time."""
-    if not _stage_wall_times:
-        return
-    total_wall = sum(_stage_wall_times.values())
-    print("\033[36mStage timing breakdown (wall/cpu):\033[0m")
-    for name, wall_sec in sorted(_stage_wall_times.items(), key=lambda kv: kv[1], reverse=True):
-        cpu_sec = _stage_cpu_times.get(name, 0.0)
-        calls = _stage_counts.get(name, 0)
-        frac = (100.0 * wall_sec / total_wall) if total_wall > 0 else 0.0
-        print(
-            f"  {name:<28} wall={wall_sec:7.2f}s  cpu={cpu_sec:7.2f}s  "
-            f"calls={calls:3d}  ({frac:5.1f}%)"
-        )
+timing_state = TimingState()
 
 
 catalog_local_file = info_root / "catalog_local_hand.xlsx"
@@ -107,18 +80,6 @@ except Exception as e:
 model = TauPyModel(model="iasp91")
 
 # ===================== Helper functions =====================
-
-
-def report_timing_once() -> None:
-    """Report cpu and wall time before showing plots."""
-    global _timing_reported
-    if _timing_reported:
-        return
-    cpu_sec = time.process_time() - _start_cpu_time
-    wall_sec = time.perf_counter() - _start_wall_time
-    print(f"\033[31mTiming: cpu={cpu_sec:.2f}s  wall={wall_sec:.2f}s\033[0m")
-    report_stage_timing()
-    _timing_reported = True
 
 
 def plot_stage_stacks(
@@ -491,7 +452,7 @@ def read_waveforms_for_event(
                 if stanum % 100 == 0:
                     print(f"Event {eve_id}: processed {stanum} stations...")
                 first_chan_for_sta = False
-    add_stage_timing("waveform_read_slice", _read_wall_start, _read_cpu_start)
+    add_stage_timing(timing_state, "waveform_read_slice", _read_wall_start, _read_cpu_start)
 
     # ---- Sort by distance ----
     st_all.sort(keys=["dist_km"])
@@ -668,7 +629,7 @@ def compute_alignment_products(
 
             if t_sta is not None:
                 calc_shifts[station_id] = t_sta - t_ref
-        add_stage_timing("taup_station_shifts", _taup_wall_start, _taup_cpu_start)
+        add_stage_timing(timing_state, "taup_station_shifts", _taup_wall_start, _taup_cpu_start)
 
     # ===================== Stage 1: align to reference -> aligned_stack =====================
     aligned_stack = np.zeros(npts)
@@ -693,7 +654,7 @@ def compute_alignment_products(
             )
 
         aligned_stack += shift_left_zeropad(d, lag1)
-    add_stage_timing("align_stage1", _stage1_wall_start, _stage1_cpu_start)
+    add_stage_timing(timing_state, "align_stage1", _stage1_wall_start, _stage1_cpu_start)
 
     win = aligned_stack[win_start:win_end]
     mx = np.max(np.abs(win)) if win.size > 0 else 0.0
@@ -757,7 +718,7 @@ def compute_alignment_products(
             selected_ids.add(station_id)
         else:
             print(f"    Rejected {station_id}: r_win={r_window:.2f}")
-    add_stage_timing("align_stage2_screen", _stage2_wall_start, _stage2_cpu_start)
+    add_stage_timing(timing_state, "align_stage2_screen", _stage2_wall_start, _stage2_cpu_start)
 
     win = selected_aligned_stack[win_start:win_end]
     mx = np.max(np.abs(win)) if win.size > 0 else 0.0
@@ -816,7 +777,7 @@ def compute_alignment_products(
             aligned_bank.append(y)
         else:
             rejected_rows.append((dist_km, station_id, y))
-    add_stage_timing("align_stage3_finalize", _stage3_wall_start, _stage3_cpu_start)
+    add_stage_timing(timing_state, "align_stage3_finalize", _stage3_wall_start, _stage3_cpu_start)
 
     selected_rows.sort(key=lambda t: t[0])
     rejected_rows.sort(key=lambda t: t[0])
@@ -954,7 +915,7 @@ def run_pipeline() -> None:
                         rotated_traces.append(trT)
                         plot_comp = "T"
     
-                add_stage_timing("rotate_to_rt", _rotate_wall_start, _rotate_cpu_start)
+                add_stage_timing(timing_state, "rotate_to_rt", _rotate_wall_start, _rotate_cpu_start)
     
                 st_comp = Stream(traces=rotated_traces)
             else:
@@ -996,7 +957,7 @@ def run_pipeline() -> None:
                     corners=4,
                     zerophase=True,
                 )
-            add_stage_timing("preprocess_filter", _pre_wall_start, _pre_cpu_start)
+            add_stage_timing(timing_state, "preprocess_filter", _pre_wall_start, _pre_cpu_start)
     
             alignment = compute_alignment_products(
                 st_comp=st_comp,
@@ -1361,10 +1322,10 @@ def run_pipeline() -> None:
                 except Exception as e:
                     print(f"[WARN] Failed to create station pass/fail maps: {e}")
     
-                add_stage_timing("plot_and_save", _plot_wall_start, _plot_cpu_start)
+                add_stage_timing(timing_state, "plot_and_save", _plot_wall_start, _plot_cpu_start)
     
                 # Show figures for single-component mode
-                report_timing_once()
+                report_timing_once(timing_state)
                 plt.show()
     
     
@@ -2080,13 +2041,13 @@ def run_pipeline() -> None:
             fig_ec.savefig(estcalc_file, dpi=300, bbox_inches='tight')
             print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
     
-        add_stage_timing("plot_three_component", _plot3_wall_start, _plot3_cpu_start)
+        add_stage_timing(timing_state, "plot_three_component", _plot3_wall_start, _plot3_cpu_start)
     
             # Show all figures together (three-component + shift comparison)
             # plt.show()
     
         # ===================== Show all figures together at the end =====================
-        report_timing_once()
+        report_timing_once(timing_state)
         print("\a\a\a")
         plt.show()
 
