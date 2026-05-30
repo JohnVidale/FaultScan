@@ -28,7 +28,7 @@ align_phase = "S"       # Alignment phase 'P' or 'S'
 verbose     = False     # If True, print detailed processing info
 
 # Paths
-path_prefix = "/Users/vidale/Documents/Research/FaultScan/"
+path_prefix = "/Users/jvidale/Documents/Research/FaultScanR/"
 info_root = Path(path_prefix + "20220930_events_cut/event_sta_info")
 
 # sps_rate = "down50"  # Subdirectory name indicating the sampling rate of the data (e.g., "down50", "down100", etc.)

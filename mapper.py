@@ -26,7 +26,7 @@ PFO_LAT = 33.6092
 PFO_LON = -116.4550
 EARTH_RADIUS_KM = 6371.0088
 USGS_EVENT_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query"
-OUTPUT_DIR = Path("/Users/vidale/Documents/Research/FaultScan/output")
+OUTPUT_DIR = Path("/Users/jvidale/Documents/ResearchR/FaultScan/output")
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -240,11 +240,11 @@ def plot_map(
     finite_mags = mags[~np.isnan(mags)]
     ax_mag.hist(
         finite_mags,
-        bins=np.arange(
+        bins=list(np.arange(
             np.floor(np.nanmin(finite_mags) * 2) / 2,
             np.ceil(np.nanmax(finite_mags) * 2) / 2 + 0.5,
             0.25,
-        ),
+        )),
         color="0.35",
     )
     ax_mag.set_xlabel("Magnitude")
@@ -259,6 +259,7 @@ def plot_map(
         fontsize=8,
     )
     fig.savefig(path, dpi=300, bbox_inches="tight")
+    plt.show()
 
 
 def write_summary(

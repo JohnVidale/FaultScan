@@ -7,8 +7,8 @@ from pathlib import Path
 from datetime import timezone
 from obspy import read, UTCDateTime
 
-OUTPUT_ROOT = Path("/Users/vidale/Documents/Research/FaultScan/output")
-CATALOG_FILE = Path("/Users/vidale/Documents/Research/FaultScan/20220930_events_cut/event_sta_info/catalog_local_hand.xlsx")
+OUTPUT_ROOT = Path("/Users/jvidale/Documents/Research/FaultScanR/output")
+CATALOG_FILE = Path("/Users/jvidale/Documents/Research/FaultScanR/20220930_events_cut/event_sta_info/catalog_local_hand.xlsx")
 ORIGIN_COL = "origin_time"
 SHOW_ORIGINAL_PLOT = False
 SHOW_CHOPPED_PLOT = False
