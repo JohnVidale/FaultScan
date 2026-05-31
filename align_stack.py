@@ -424,6 +424,65 @@ def plot_estimated_vs_calculated_shifts(
     print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
 
 
+def plot_snippet_comparison(
+    start_time: float,
+    win_start: int,
+    win_end: int,
+    sample_rate: float,
+    ref_window: np.ndarray,
+    pass_window_ids: set,
+    snippet_by_station: dict,
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    save_dir: Path,
+) -> None:
+    """Plot pass/fail correlation-window snippets against the reference window."""
+    try:
+        t_win = start_time + (np.arange(win_start, win_end) / sample_rate)
+        pass_list = sorted(list(pass_window_ids), key=lambda s: int(s))
+        fail_list = sorted(
+            [s for s in snippet_by_station.keys() if s not in pass_window_ids],
+            key=lambda s: int(s),
+        )
+
+        n_show = 10
+        pass_show = pass_list[:n_show]
+        fail_show = fail_list[:n_show]
+
+        fig_snip, (axp, axf) = plt.subplots(1, 2, figsize=(10, 3.8), sharey=True)
+        set_figure_title(fig_snip, f"{eve_id} {plot_comp} correlation snippets")
+
+        for sid in pass_show:
+            axp.plot(t_win, snippet_by_station[sid], color="k", alpha=0.4, lw=1)
+        axp.plot(t_win, ref_window, color="C3", lw=2, label="Ref window")
+        axp.set_title(f"Pass r_win (N={len(pass_list)})")
+        axp.set_xlabel("Time since origin (s)")
+        axp.grid(alpha=0.3)
+
+        for sid in fail_show:
+            axf.plot(t_win, snippet_by_station[sid], color="k", alpha=0.4, lw=1)
+        axf.plot(t_win, ref_window, color="C3", lw=2, label="Ref window")
+        axf.set_title(f"Fail r_win (N={len(fail_list)})")
+        axf.set_xlabel("Time since origin (s)")
+        axf.grid(alpha=0.3)
+
+        axp.set_ylabel("Normalized amplitude")
+        axf.legend(loc="upper right", fontsize=8)
+        fig_snip.suptitle(
+            f"Event {eve_id} {plot_comp}: correlation-window snippets",
+            fontsize=12,
+            fontweight="bold",
+        )
+        plt.tight_layout()
+
+        snip_file = save_dir / f"{eve_id}_{plot_comp}_snippet_compare_{align_phase_name}.png"
+        fig_snip.savefig(snip_file, dpi=300, bbox_inches="tight")
+        print(f"✓ Snippet comparison plot saved to: {snip_file}")
+    except Exception as e:
+        print(f"[WARN] Failed to create snippet comparison plot: {e}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -803,50 +862,19 @@ def run_pipeline() -> None:
                 )
     
                 # ===================== Snippet comparison plot (pass vs fail) =====================
-                try:
-                    t_win = start_time + (np.arange(win_start, win_end) / sample_rate)
-                    ref_win = ref_window
-                    pass_list = sorted(list(pass_window_ids), key=lambda s: int(s))
-                    fail_list = sorted(
-                        [s for s in snippet_by_station.keys() if s not in pass_window_ids],
-                        key=lambda s: int(s),
-                    )
-    
-                    n_show = 10
-                    pass_show = pass_list[:n_show]
-                    fail_show = fail_list[:n_show]
-    
-                    fig_snip, (axp, axf) = plt.subplots(1, 2, figsize=(10, 3.8), sharey=True)
-                    set_figure_title(fig_snip, f"{eve_id} {plot_comp} correlation snippets")
-    
-                    for sid in pass_show:
-                        axp.plot(t_win, snippet_by_station[sid], color='k', alpha=0.4, lw=1)
-                    axp.plot(t_win, ref_win, color='C3', lw=2, label='Ref window')
-                    axp.set_title(f"Pass r_win (N={len(pass_list)})")
-                    axp.set_xlabel('Time since origin (s)')
-                    axp.grid(alpha=0.3)
-    
-                    for sid in fail_show:
-                        axf.plot(t_win, snippet_by_station[sid], color='k', alpha=0.4, lw=1)
-                    axf.plot(t_win, ref_win, color='C3', lw=2, label='Ref window')
-                    axf.set_title(f"Fail r_win (N={len(fail_list)})")
-                    axf.set_xlabel('Time since origin (s)')
-                    axf.grid(alpha=0.3)
-    
-                    axp.set_ylabel('Normalized amplitude')
-                    axf.legend(loc='upper right', fontsize=8)
-                    fig_snip.suptitle(
-                        f"Event {eve_id} {plot_comp}: correlation-window snippets",
-                        fontsize=12,
-                        fontweight='bold',
-                    )
-                    plt.tight_layout()
-    
-                    snip_file = save_dir / f"{eve_id}_{plot_comp}_snippet_compare_{align_phase}.png"
-                    fig_snip.savefig(snip_file, dpi=300, bbox_inches='tight')
-                    print(f"✓ Snippet comparison plot saved to: {snip_file}")
-                except Exception as e:
-                    print(f"[WARN] Failed to create snippet comparison plot: {e}")
+                plot_snippet_comparison(
+                    start_time=start_time,
+                    win_start=win_start,
+                    win_end=win_end,
+                    sample_rate=sample_rate,
+                    ref_window=ref_window,
+                    pass_window_ids=pass_window_ids,
+                    snippet_by_station=snippet_by_station,
+                    eve_id=eve_id,
+                    plot_comp=plot_comp,
+                    align_phase_name=align_phase,
+                    save_dir=save_dir,
+                )
     
                 # ===================== Individual seismograms (20 traces per subplot, 5 panels per figure) =====================
                 if show_individual_seismograms:
