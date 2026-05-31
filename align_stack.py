@@ -1551,6 +1551,77 @@ def plot_single_component_products(
     )
 
 
+def store_three_component_data(
+    all_component_data: dict,
+    channel: str,
+    sel_comp: str,
+    record_fig,
+    selected_rows: list,
+    rejected_rows: list,
+    stack_vec,
+    t_abs,
+    mask,
+    sample_rate: float,
+    win_start,
+    win_end,
+    move_limit_samples: int,
+    npts: int,
+    eve_id: str,
+    align_phase_name: str,
+    origin,
+    station_shifts: dict,
+    station_corr: dict,
+    calc_shifts: dict,
+    n_pass_window: int,
+    pass_window_ids: set,
+    snippet_by_station: dict,
+    ref_window,
+    p_traveltime,
+    s_traveltime,
+    name2ll: dict,
+    selected_ids: set,
+    aligned_traces_by_station: dict,
+    t_ref,
+) -> None:
+    """Store per-component plotting payload for deferred 3-component rendering."""
+    comp_key = resolve_component_key(channel, sel_comp)
+    all_component_data[comp_key] = build_component_output_payload(
+        record_fig=record_fig,
+        selected_rows=selected_rows,
+        rejected_rows=rejected_rows,
+        stack_vec=stack_vec,
+        t_abs=t_abs,
+        mask=mask,
+        sample_rate=sample_rate,
+        win_start=win_start,
+        win_end=win_end,
+        move_limit_sec_value=move_limit_sec,
+        move_limit_samples=move_limit_samples,
+        npts=npts,
+        start_t=start_time,
+        end_t=end_time,
+        eve_id=eve_id,
+        align_phase_name=align_phase_name,
+        origin=origin,
+        station_shifts=station_shifts,
+        station_corr=station_corr,
+        calc_shifts=calc_shifts,
+        n_pass_window=n_pass_window,
+        pass_window_ids=pass_window_ids,
+        snippet_by_station=snippet_by_station,
+        ref_window=ref_window,
+        p_traveltime=p_traveltime,
+        s_traveltime=s_traveltime,
+        name2ll=name2ll,
+        selected_ids=selected_ids,
+        aligned_traces_by_station=aligned_traces_by_station,
+        t_ref=t_ref,
+    )
+
+    if record_fig is not None:
+        plt.close(record_fig)
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1858,8 +1929,10 @@ def run_pipeline() -> None:
     
             # Store data for three-component plotting or show individual plot
             if process_as_three_comp:
-                comp_key = resolve_component_key(channel, sel_comp)
-                all_component_data[comp_key] = build_component_output_payload(
+                store_three_component_data(
+                    all_component_data=all_component_data,
+                    channel=channel,
+                    sel_comp=sel_comp,
                     record_fig=record_fig,
                     selected_rows=selected_rows,
                     rejected_rows=rejected_rows,
@@ -1869,11 +1942,8 @@ def run_pipeline() -> None:
                     sample_rate=sample_rate,
                     win_start=win_start,
                     win_end=win_end,
-                    move_limit_sec_value=move_limit_sec,
                     move_limit_samples=move_limit_samples,
                     npts=npts,
-                    start_t=start_time,
-                    end_t=end_time,
                     eve_id=eve_id,
                     align_phase_name=align_phase,
                     origin=origin,
@@ -1891,9 +1961,6 @@ def run_pipeline() -> None:
                     aligned_traces_by_station=aligned_traces_by_station,
                     t_ref=t_ref,
                 )
-                
-                if record_fig is not None:
-                    plt.close(record_fig)  # Close individual figure
             else:
                 # Show individual plot in non-three-component mode
                 # No Z-only R–T screening reuse.
