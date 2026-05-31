@@ -138,6 +138,55 @@ def build_component_output_payload(
     return payload
 
 
+def build_alignment_products_payload(
+    npts: int,
+    sample_rate: float,
+    move_limit_samples: int,
+    win_start: int,
+    win_end: int,
+    calc_shifts: dict,
+    aligned_stack: np.ndarray,
+    selected_aligned_stack: np.ndarray,
+    selected_ids: set,
+    station_corr: dict,
+    n_pass_window: int,
+    pass_window_ids: set,
+    snippet_by_station: dict,
+    ref_window: np.ndarray,
+    selected_rows: list,
+    rejected_rows: list,
+    station_shifts: dict,
+    aligned_traces_by_station: dict,
+    t_abs: np.ndarray,
+    mask: np.ndarray,
+    stack_vec: np.ndarray,
+):
+    """Assemble the alignment products payload used by downstream plotting/output."""
+    return {
+        "npts": npts,
+        "sample_rate": sample_rate,
+        "move_limit_samples": move_limit_samples,
+        "win_start": win_start,
+        "win_end": win_end,
+        "calc_shifts": calc_shifts,
+        "aligned_stack": aligned_stack,
+        "selected_aligned_stack": selected_aligned_stack,
+        "selected_ids": selected_ids,
+        "station_corr": station_corr,
+        "n_pass_window": n_pass_window,
+        "pass_window_ids": pass_window_ids,
+        "snippet_by_station": snippet_by_station,
+        "ref_window": ref_window,
+        "selected_rows": selected_rows,
+        "rejected_rows": rejected_rows,
+        "station_shifts": station_shifts,
+        "aligned_traces_by_station": aligned_traces_by_station,
+        "t_abs": t_abs,
+        "mask": mask,
+        "stack_vec": stack_vec,
+    }
+
+
 def make_event_output_dir(base_prefix: str, eve_id: str) -> Path:
     """Create and return output directory for one event."""
     save_path = Path(base_prefix + "output")

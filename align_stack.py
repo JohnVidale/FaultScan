@@ -17,6 +17,7 @@ from align_utils import (
     add_catalog_event_lines,
     add_stage_timing,
     add_utc_time_axis,
+    build_alignment_products_payload,
     build_component_output_payload,
     compute_phase_travel_times,
     compute_stage1_aligned_stack,
@@ -381,29 +382,29 @@ def compute_alignment_products(
     mask = axis_stack_products["mask"]
     stack_vec = axis_stack_products["stack_vec"]
 
-    return {
-        "npts": npts,
-        "sample_rate": sample_rate,
-        "move_limit_samples": move_limit_samples,
-        "win_start": win_start,
-        "win_end": win_end,
-        "calc_shifts": calc_shifts,
-        "aligned_stack": aligned_stack,
-        "selected_aligned_stack": selected_aligned_stack,
-        "selected_ids": selected_ids,
-        "station_corr": station_corr,
-        "n_pass_window": n_pass_window,
-        "pass_window_ids": pass_window_ids,
-        "snippet_by_station": snippet_by_station,
-        "ref_window": ref_window,
-        "selected_rows": selected_rows,
-        "rejected_rows": rejected_rows,
-        "station_shifts": station_shifts,
-        "aligned_traces_by_station": aligned_traces_by_station,
-        "t_abs": t_abs,
-        "mask": mask,
-        "stack_vec": stack_vec,
-    }
+    return build_alignment_products_payload(
+        npts=npts,
+        sample_rate=sample_rate,
+        move_limit_samples=move_limit_samples,
+        win_start=win_start,
+        win_end=win_end,
+        calc_shifts=calc_shifts,
+        aligned_stack=aligned_stack,
+        selected_aligned_stack=selected_aligned_stack,
+        selected_ids=selected_ids,
+        station_corr=station_corr,
+        n_pass_window=n_pass_window,
+        pass_window_ids=pass_window_ids,
+        snippet_by_station=snippet_by_station,
+        ref_window=ref_window,
+        selected_rows=selected_rows,
+        rejected_rows=rejected_rows,
+        station_shifts=station_shifts,
+        aligned_traces_by_station=aligned_traces_by_station,
+        t_abs=t_abs,
+        mask=mask,
+        stack_vec=stack_vec,
+    )
 
 def run_pipeline() -> None:
     global align_phase, move_limit_sec, start_time, end_time
