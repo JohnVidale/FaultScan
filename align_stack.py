@@ -2070,85 +2070,6 @@ def compute_alignment_products(
         mask=mask,
         stack_vec=stack_vec,
     )
-def run_three_component_combined_outputs(
-    all_component_data: dict,
-    show_record_section_plot: bool,
-    eve_id: str,
-    align_phase: str,
-    save_dir: Path,
-    catalog_df,
-    pass_window_ids: set,
-) -> None:
-    """Run combined three-component plotting, output persistence, and summaries."""
-    _plot3_wall_start, _plot3_cpu_start = start_plot_timing()
-    print_three_component_banner()
-
-    fig, gs = setup_three_component_record_figure(
-        show_record=show_record_section_plot,
-        eve_id=eve_id,
-        align_phase_name=align_phase,
-    )
-
-    (
-        comp_order,
-        comp_titles,
-        eve_id,
-        align_phase,
-        start_time,
-        end_time,
-        t_abs,
-        mask,
-        sample_rate_env,
-        origin_env,
-    ) = get_three_component_plot_context(all_component_data)
-
-    stack_by_comp, t_abs, mask = render_and_collect_three_component_stacks(
-        all_component_data=all_component_data,
-        comp_order=comp_order,
-        comp_titles=comp_titles,
-        show_record=show_record_section_plot,
-        fig=fig,
-        gs=gs,
-        start_time=start_time,
-        end_time=end_time,
-        t_abs=t_abs,
-        mask=mask,
-    )
-
-    save_dir = persist_three_component_outputs(
-        comp_order=comp_order,
-        stack_by_comp=stack_by_comp,
-        save_dir=save_dir,
-        eve_id=eve_id,
-        origin_env=origin_env,
-        start_time=start_time,
-        sample_rate_env=sample_rate_env,
-        show_record=show_record_section_plot,
-        fig=fig,
-        align_phase_name=align_phase,
-    )
-
-    # No R-T zero-diff station list saved.
-    plot_three_component_summary_products(
-        all_component_data=all_component_data,
-        comp_order=comp_order,
-        stack_by_comp=stack_by_comp,
-        sample_rate_env=sample_rate_env,
-        t_abs=t_abs,
-        mask=mask,
-        end_time=end_time,
-        start_time=start_time,
-        eve_id=eve_id,
-        align_phase_name=align_phase,
-        save_dir=save_dir,
-        origin_env=origin_env,
-        catalog_df=catalog_df,
-        pass_window_ids=pass_window_ids,
-    )
-
-    finalize_three_component_plotting(_plot3_wall_start, _plot3_cpu_start)
-
-
 def run_pipeline() -> None:
     global align_phase, move_limit_sec, start_time, end_time
     save_dir = Path(path_prefix + "output")
@@ -2362,15 +2283,73 @@ def run_pipeline() -> None:
 
     # Three-component combined plotting
     if process_as_three_comp and len(all_component_data) == 3:
-        run_three_component_combined_outputs(
-            all_component_data=all_component_data,
-            show_record_section_plot=show_record_section_plot,
+        _plot3_wall_start, _plot3_cpu_start = start_plot_timing()
+        print_three_component_banner()
+
+        fig, gs = setup_three_component_record_figure(
+            show_record=show_record_section_plot,
             eve_id=eve_id,
-            align_phase=align_phase,
+            align_phase_name=align_phase,
+        )
+
+        (
+            comp_order,
+            comp_titles,
+            eve_id,
+            align_phase,
+            start_time,
+            end_time,
+            t_abs,
+            mask,
+            sample_rate_env,
+            origin_env,
+        ) = get_three_component_plot_context(all_component_data)
+
+        stack_by_comp, t_abs, mask = render_and_collect_three_component_stacks(
+            all_component_data=all_component_data,
+            comp_order=comp_order,
+            comp_titles=comp_titles,
+            show_record=show_record_section_plot,
+            fig=fig,
+            gs=gs,
+            start_time=start_time,
+            end_time=end_time,
+            t_abs=t_abs,
+            mask=mask,
+        )
+
+        save_dir = persist_three_component_outputs(
+            comp_order=comp_order,
+            stack_by_comp=stack_by_comp,
             save_dir=save_dir,
+            eve_id=eve_id,
+            origin_env=origin_env,
+            start_time=start_time,
+            sample_rate_env=sample_rate_env,
+            show_record=show_record_section_plot,
+            fig=fig,
+            align_phase_name=align_phase,
+        )
+
+        # No R-T zero-diff station list saved.
+        plot_three_component_summary_products(
+            all_component_data=all_component_data,
+            comp_order=comp_order,
+            stack_by_comp=stack_by_comp,
+            sample_rate_env=sample_rate_env,
+            t_abs=t_abs,
+            mask=mask,
+            end_time=end_time,
+            start_time=start_time,
+            eve_id=eve_id,
+            align_phase_name=align_phase,
+            save_dir=save_dir,
+            origin_env=origin_env,
             catalog_df=catalog_local,
             pass_window_ids=pass_window_ids,
         )
+
+        finalize_three_component_plotting(_plot3_wall_start, _plot3_cpu_start)
 
 def main() -> None:
     run_pipeline()
