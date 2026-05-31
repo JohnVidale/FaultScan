@@ -2347,7 +2347,7 @@ def maybe_run_three_component_combined_outputs(
     pass_window_ids: set,
 ) -> None:
     """Run combined three-component outputs only when full component data exists."""
-    if not should_run_three_component_combined(process_as_three_comp, all_component_data):
+    if not (process_as_three_comp and len(all_component_data) == 3):
         return
 
     run_three_component_combined_outputs(
@@ -2359,11 +2359,6 @@ def maybe_run_three_component_combined_outputs(
         catalog_df=catalog_df,
         pass_window_ids=pass_window_ids,
     )
-
-
-def should_run_three_component_combined(process_as_three_comp: bool, all_component_data: dict) -> bool:
-    """Return whether combined three-component plotting should execute."""
-    return process_as_three_comp and len(all_component_data) == 3
 
 def run_pipeline() -> None:
     global align_phase, move_limit_sec, start_time, end_time
