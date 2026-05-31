@@ -1719,6 +1719,32 @@ def load_event_context_and_waveforms(
     )
 
 
+def run_alignment_and_unpack(
+    st_comp: Stream,
+    ref_trace: Trace,
+    ref_station_id,
+    name2ll: dict,
+    eve_lat: float,
+    eve_lon: float,
+    event_depth: float,
+    align_phase_name: str,
+    t_ref,
+):
+    """Compute alignment products and return unpacked values used by run_pipeline."""
+    alignment = compute_alignment_products(
+        st_comp=st_comp,
+        ref_trace=ref_trace,
+        ref_station_id=ref_station_id,
+        name2ll=name2ll,
+        eve_lat=eve_lat,
+        eve_lon=eve_lon,
+        event_depth=event_depth,
+        align_phase_name=align_phase_name,
+        t_ref=t_ref,
+    )
+    return unpack_alignment_products(alignment)
+
+
 def store_three_component_data(
     all_component_data: dict,
     channel: str,
@@ -2053,17 +2079,6 @@ def run_pipeline() -> None:
                 timing_state=timing_state,
             )
     
-            alignment = compute_alignment_products(
-                st_comp=st_comp,
-                ref_trace=ref_trace,
-                ref_station_id=ref_station_id,
-                name2ll=name2ll,
-                eve_lat=eve_lat,
-                eve_lon=eve_lon,
-                event_depth=event_depth,
-                align_phase_name=align_phase,
-                t_ref=t_ref,
-            )
             (
                 npts,
                 sample_rate,
@@ -2086,7 +2101,17 @@ def run_pipeline() -> None:
                 t_abs,
                 mask,
                 stack_vec,
-            ) = unpack_alignment_products(alignment)
+            ) = run_alignment_and_unpack(
+                st_comp=st_comp,
+                ref_trace=ref_trace,
+                ref_station_id=ref_station_id,
+                name2ll=name2ll,
+                eve_lat=eve_lat,
+                eve_lon=eve_lon,
+                event_depth=event_depth,
+                align_phase_name=align_phase,
+                t_ref=t_ref,
+            )
     
             # ---- Plot: superposition of Stage1/Stage2/Final stacks ----
             _plot_wall_start, _plot_cpu_start = start_plot_timing()
