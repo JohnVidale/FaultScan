@@ -39,6 +39,7 @@ from align_utils import (
     resolve_component_key,
     select_reference_trace,
     print_reference_summary,
+    preprocess_traces_bandpass,
     set_figure_title,
     TimingState,
 )
@@ -496,21 +497,12 @@ def run_pipeline() -> None:
                 continue
     
             # ---- Preprocess traces (detrend/taper/filter) ----
-            _pre_wall_start = time.perf_counter()
-            _pre_cpu_start = time.process_time()
-            for tr in st_comp:
-                tr.detrend(type="demean")
-                trace_len_sec = float(tr.stats.npts) / float(tr.stats.sampling_rate)
-                taper_pct = min(0.05, 5.0 / trace_len_sec) if trace_len_sec > 0 else 0.0
-                tr.taper(max_percentage=taper_pct, type="cosine")
-                tr.filter(
-                    "bandpass",
-                    freqmin=min_freq,
-                    freqmax=max_freq,
-                    corners=4,
-                    zerophase=True,
-                )
-            add_stage_timing(timing_state, "preprocess_filter", _pre_wall_start, _pre_cpu_start)
+            preprocess_traces_bandpass(
+                st_comp=st_comp,
+                min_freq=min_freq,
+                max_freq=max_freq,
+                timing_state=timing_state,
+            )
     
             alignment = compute_alignment_products(
                 st_comp=st_comp,

@@ -386,6 +386,30 @@ def rotate_horizontals_to_component(
     return Stream(traces=rotated_traces), plot_comp
 
 
+def preprocess_traces_bandpass(
+    st_comp,
+    min_freq: float,
+    max_freq: float,
+    timing_state: TimingState,
+) -> None:
+    """Detrend/taper/filter traces prior to alignment."""
+    _pre_wall_start = time.perf_counter()
+    _pre_cpu_start = time.process_time()
+    for tr in st_comp:
+        tr.detrend(type="demean")
+        trace_len_sec = float(tr.stats.npts) / float(tr.stats.sampling_rate)
+        taper_pct = min(0.05, 5.0 / trace_len_sec) if trace_len_sec > 0 else 0.0
+        tr.taper(max_percentage=taper_pct, type="cosine")
+        tr.filter(
+            "bandpass",
+            freqmin=min_freq,
+            freqmax=max_freq,
+            corners=4,
+            zerophase=True,
+        )
+    add_stage_timing(timing_state, "preprocess_filter", _pre_wall_start, _pre_cpu_start)
+
+
 def select_reference_trace(st_comp, name2ll: dict):
     """Pick reference station closest to array center and return (id, trace)."""
     st_comp.sort(keys=["dist_km"])
