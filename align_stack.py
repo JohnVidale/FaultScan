@@ -2303,14 +2303,11 @@ def run_three_component_combined_outputs(
 def run_pipeline() -> None:
     global align_phase, move_limit_sec, start_time, end_time
     save_dir = Path(path_prefix + "output")
-    # ===================== Channel / component selection =====================
     # User-facing components: Z, R, T
     channels, process_as_three_comp, sel_comp_list = get_component_selection(
         all_channels, component
     )
-    
-    
-    # ===================== Main loop =====================
+
     # Storage for three-component mode
     if process_as_three_comp:
         (
@@ -2374,15 +2371,14 @@ def run_pipeline() -> None:
                 t_ref,
                 num_traces,
             ) = stream_ref_context
-    
-            # ---- Preprocess traces (detrend/taper/filter) ----
+
             preprocess_traces_bandpass(
                 st_comp=st_comp,
                 min_freq=min_freq,
                 max_freq=max_freq,
                 timing_state=timing_state,
             )
-    
+
             (
                 npts,
                 sample_rate,
@@ -2416,8 +2412,7 @@ def run_pipeline() -> None:
                 align_phase_name=align_phase,
                 t_ref=t_ref,
             )
-    
-            # ---- Plot: superposition of Stage1/Stage2/Final stacks ----
+
             _plot_wall_start, _plot_cpu_start = start_plot_timing()
             if not all_channels:
                 plot_stage_stacks(
@@ -2431,8 +2426,7 @@ def run_pipeline() -> None:
                     stack_vec=stack_vec,
                     save_dir=save_dir,
                 )
-    
-            # ---- Plot: record section (top) + stack (bottom) ----
+
             record_fig = plot_record_section_and_stack(
                 show_record=show_record_section_plot,
                 eve_id=eve_id,
@@ -2452,7 +2446,7 @@ def run_pipeline() -> None:
                 stack_vec=stack_vec,
                 save_dir=save_dir,
             )
-    
+
             # Store data for three-component plotting or show individual plot
             if process_as_three_comp:
                 store_three_component_data(
@@ -2518,10 +2512,8 @@ def run_pipeline() -> None:
                     plot_wall_start=_plot_wall_start,
                     plot_cpu_start=_plot_cpu_start,
                 )
-    
-    
-    
-    # ===================== Three-component combined plotting =====================
+
+    # Three-component combined plotting
     if process_as_three_comp and len(all_component_data) == 3:
         run_three_component_combined_outputs(
             all_component_data=all_component_data,
