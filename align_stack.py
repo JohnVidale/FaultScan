@@ -862,6 +862,62 @@ def plot_individual_seismograms_three_components(
         print(f"[WARN] Failed to create individual seismograms plots (3 components): {e}")
 
 
+def plot_three_component_station_pass_map(
+    all_component_data: dict,
+    eve_id: str,
+    align_phase_name: str,
+    save_dir: Path,
+) -> None:
+    """Plot station pass/fail maps for Z/R/T side-by-side."""
+    try:
+        fig_map, axes_map = plt.subplots(1, 3, figsize=(14, 4.5), sharex=True, sharey=True)
+        set_figure_title(fig_map, f"{eve_id} station pass map (3-comp)")
+        comp_order = ["DPZ", "R", "T"]
+        comp_titles_map = ["Z", "R", "T"]
+
+        for j, comp_name in enumerate(comp_order):
+            axm = axes_map[j]
+            if comp_name not in all_component_data:
+                axm.set_axis_off()
+                continue
+
+            data = all_component_data[comp_name]
+            station_ll = data.get("station_ll", {})
+            tr_map = data.get("aligned_traces_by_station", {})
+            all_stations = sorted(tr_map.keys(), key=lambda s: int(s))
+            pass_set = set(data.get("pass_window_ids", []))
+
+            pass_lats = [station_ll[s][0] for s in all_stations if s in pass_set and s in station_ll]
+            pass_lons = [station_ll[s][1] for s in all_stations if s in pass_set and s in station_ll]
+            fail_lats = [station_ll[s][0] for s in all_stations if s not in pass_set and s in station_ll]
+            fail_lons = [station_ll[s][1] for s in all_stations if s not in pass_set and s in station_ll]
+
+            if len(fail_lons) > 0:
+                axm.scatter(fail_lons, fail_lats, s=16, c="0.7", label="Fail")
+            if len(pass_lons) > 0:
+                axm.scatter(pass_lons, pass_lats, s=20, c="C3", label="Pass")
+
+            axm.set_title(comp_titles_map[j], fontsize=12, fontweight="bold")
+            if j == 0:
+                axm.set_ylabel("Latitude")
+            axm.grid(alpha=0.3)
+            axm.set_xlabel("Longitude")
+            axm.legend(loc="upper right", fontsize=8)
+
+        fig_map.suptitle(
+            f"Event {eve_id} - Stations passing thresholds ({align_phase_name})",
+            fontsize=13,
+            fontweight="bold",
+        )
+        plt.tight_layout()
+
+        map_file = save_dir / f"{eve_id}_station_pass_map_{align_phase_name}.png"
+        fig_map.savefig(map_file, dpi=300, bbox_inches="tight")
+        print(f"✓ Station pass/fail map saved to: {map_file}")
+    except Exception as e:
+        print(f"[WARN] Failed to create station pass/fail map (3 components): {e}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1512,53 +1568,12 @@ def run_pipeline() -> None:
         )
     
         # ===================== Station maps: pass r_win (3 components) =====================
-        try:
-            fig_map, axes_map = plt.subplots(1, 3, figsize=(14, 4.5), sharex=True, sharey=True)
-            set_figure_title(fig_map, f"{eve_id} station pass map (3-comp)")
-            comp_order = ['DPZ', 'R', 'T']
-            comp_titles_map = ['Z', 'R', 'T']
-    
-            for j, comp_name in enumerate(comp_order):
-                axm = axes_map[j]
-                if comp_name not in all_component_data:
-                    axm.set_axis_off()
-                    continue
-    
-                data = all_component_data[comp_name]
-                station_ll = data.get('station_ll', {})
-                tr_map = data.get('aligned_traces_by_station', {})
-                all_stations = sorted(tr_map.keys(), key=lambda s: int(s))
-                pass_set = set(data.get('pass_window_ids', []))
-    
-                pass_lats = [station_ll[s][0] for s in all_stations if s in pass_set and s in station_ll]
-                pass_lons = [station_ll[s][1] for s in all_stations if s in pass_set and s in station_ll]
-                fail_lats = [station_ll[s][0] for s in all_stations if s not in pass_set and s in station_ll]
-                fail_lons = [station_ll[s][1] for s in all_stations if s not in pass_set and s in station_ll]
-    
-                if len(fail_lons) > 0:
-                    axm.scatter(fail_lons, fail_lats, s=16, c='0.7', label='Fail')
-                if len(pass_lons) > 0:
-                    axm.scatter(pass_lons, pass_lats, s=20, c='C3', label='Pass')
-    
-                axm.set_title(comp_titles_map[j], fontsize=12, fontweight='bold')
-                if j == 0:
-                    axm.set_ylabel('Latitude')
-                axm.grid(alpha=0.3)
-                axm.set_xlabel('Longitude')
-                axm.legend(loc='upper right', fontsize=8)
-    
-            fig_map.suptitle(
-                f'Event {eve_id} - Stations passing thresholds ({align_phase})',
-                fontsize=13,
-                fontweight='bold'
-            )
-            plt.tight_layout()
-    
-            map_file = save_dir / f"{eve_id}_station_pass_map_{align_phase}.png"
-            fig_map.savefig(map_file, dpi=300, bbox_inches='tight')
-            print(f"✓ Station pass/fail map saved to: {map_file}")
-        except Exception as e:
-            print(f"[WARN] Failed to create station pass/fail map (3 components): {e}")
+        plot_three_component_station_pass_map(
+            all_component_data=all_component_data,
+            eve_id=eve_id,
+            align_phase_name=align_phase,
+            save_dir=save_dir,
+        )
     
         # ===================== Shift comparison plot: Radial vs Transverse =====================
         if 'R' in all_component_data and 'T' in all_component_data:
