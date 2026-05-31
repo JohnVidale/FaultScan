@@ -89,7 +89,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             self.mod,
             "plot_record_section_and_stack",
             return_value="FIG",
-        ), patch.object(
+        ) as mock_record, patch.object(
             self.mod,
             "plot_single_component_products",
             return_value=None,
@@ -110,7 +110,18 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
 
         mock_preprocess.assert_called_once()
         mock_plot_stage.assert_called_once()
+        mock_record.assert_called_once()
+        self.assertEqual(mock_record.call_args.kwargs["eve_id"], "E1")
+        self.assertEqual(mock_record.call_args.kwargs["plot_comp"], "Z")
+        self.assertEqual(mock_record.call_args.kwargs["align_phase_name"], self.mod.align_phase)
+        self.assertEqual(mock_record.call_args.kwargs["save_dir"], "/tmp")
         mock_single.assert_called_once()
+        self.assertEqual(mock_single.call_args.kwargs["record_fig"], "FIG")
+        self.assertEqual(mock_single.call_args.kwargs["eve_id"], "E1")
+        self.assertEqual(mock_single.call_args.kwargs["plot_comp"], "Z")
+        self.assertEqual(mock_single.call_args.kwargs["align_phase_name"], self.mod.align_phase)
+        self.assertEqual(mock_single.call_args.kwargs["num_traces"], 1)
+        self.assertEqual(mock_single.call_args.kwargs["save_dir"], "/tmp")
         mock_finalize.assert_called_once()
         mock_store.assert_not_called()
         mock_setup.assert_not_called()
@@ -292,7 +303,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             self.mod,
             "plot_record_section_and_stack",
             return_value="FIG",
-        ), patch.object(
+        ) as mock_record, patch.object(
             self.mod,
             "store_three_component_data",
             side_effect=fake_store,
@@ -339,12 +350,23 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             self.mod.run_pipeline()
 
         self.assertEqual(mock_store.call_count, 3)
+        self.assertEqual(mock_record.call_count, 3)
+        for rec_call in mock_record.call_args_list:
+            self.assertEqual(rec_call.kwargs["eve_id"], "E1")
+            self.assertEqual(rec_call.kwargs["align_phase_name"], self.mod.align_phase)
+            self.assertEqual(rec_call.kwargs["save_dir"], "/tmp")
         mock_plot_stage.assert_not_called()
         mock_setup.assert_called_once()
         mock_persist.assert_called_once()
         mock_summary.assert_called_once()
         mock_finalize3.assert_called_once()
         mock_single.assert_not_called()
+
+        mock_summary.assert_called_once()
+        self.assertEqual(mock_summary.call_args.kwargs["eve_id"], "E1")
+        self.assertEqual(mock_summary.call_args.kwargs["align_phase_name"], self.mod.align_phase)
+        self.assertEqual(mock_summary.call_args.kwargs["save_dir"], "/tmp")
+        self.assertEqual(mock_summary.call_args.kwargs["comp_order"], ["DPZ", "R", "T"])
 
     def test_run_pipeline_three_component_skips_combined_when_incomplete(self):
         event_context = (
