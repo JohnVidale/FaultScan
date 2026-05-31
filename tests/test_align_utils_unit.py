@@ -27,6 +27,22 @@ class AlignUtilsUnitTests(unittest.TestCase):
         self.assertAlmostEqual(state.stage_cpu_times["stageA"], 0.7, places=6)
         self.assertEqual(state.stage_counts["stageA"], 2)
 
+    def test_report_timing_once_is_idempotent(self):
+        state = align_utils.TimingState()
+        state.start_cpu_time = 100.0
+        state.start_wall_time = 200.0
+
+        with patch.object(align_utils.time, "process_time", side_effect=[101.0, 102.0]), patch.object(
+            align_utils.time,
+            "perf_counter",
+            side_effect=[203.0, 206.0],
+        ), patch.object(align_utils, "report_stage_timing", return_value=None) as mock_stage:
+            align_utils.report_timing_once(state)
+            align_utils.report_timing_once(state)
+
+        self.assertTrue(state.timing_reported)
+        mock_stage.assert_called_once_with(state)
+
     def test_build_alignment_products_payload_contains_expected_keys(self):
         payload = align_utils.build_alignment_products_payload(
             npts=100,
