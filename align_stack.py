@@ -18,6 +18,7 @@ from align_utils import (
     add_stage_timing,
     add_utc_time_axis,
     build_component_output_payload,
+    compute_phase_travel_times,
     compute_lag,
     correlation_time_bounds,
     draw_correlation_markers,
@@ -375,38 +376,6 @@ def read_waveforms_for_event(
         horizontal_raw_limits_cache[eve_id] = raw_limits_by_station.copy()
 
     return st_window, raw_limits_by_station
-
-
-def compute_phase_travel_times(model_obj, event_depth: float, ref_trace: Trace, origin_time, align_phase_name: str):
-    """Compute P/S travel times at reference station and selected alignment phase time."""
-    ref_deg = float(ref_trace.stats.dist_deg)
-    tts = model_obj.get_travel_times(
-        source_depth_in_km=event_depth,
-        distance_in_degree=ref_deg,
-        phase_list=["p", "P", "s", "S"],
-    )
-
-    p_traveltime = None
-    s_traveltime = None
-    p_arrival_time = None
-    s_arrival_time = None
-
-    for tt in reversed(tts):
-        if tt.phase.name.upper() == "P":
-            p_traveltime = float(tt.time)
-            p_arrival_time = origin_time + p_traveltime
-        if tt.phase.name.upper() == "S":
-            s_traveltime = float(tt.time)
-            s_arrival_time = origin_time + s_traveltime
-
-    if align_phase_name == "P" and p_traveltime is not None:
-        phase_traveltime = float(p_traveltime)
-    elif align_phase_name == "S" and s_traveltime is not None:
-        phase_traveltime = float(s_traveltime)
-    else:
-        phase_traveltime = None
-
-    return p_traveltime, s_traveltime, p_arrival_time, s_arrival_time, phase_traveltime
 
 
 def compute_alignment_products(
