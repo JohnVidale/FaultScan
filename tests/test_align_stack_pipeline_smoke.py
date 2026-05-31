@@ -110,6 +110,35 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
         mock_finalize.assert_called_once()
         mock_store.assert_not_called()
 
+    def test_run_pipeline_no_events_short_circuits(self):
+        with patch.object(self.mod, "events", []), patch.object(self.mod, "all_channels", False), patch.object(
+            self.mod,
+            "get_component_selection",
+            return_value=("DPZ".split(), False, "Z".split()),
+        ), patch.object(
+            self.mod,
+            "load_event_context_and_waveforms",
+            return_value=None,
+        ) as mock_load, patch.object(
+            self.mod,
+            "prepare_stream_reference_context",
+            return_value=None,
+        ) as mock_prepare, patch.object(
+            self.mod,
+            "run_alignment_and_unpack",
+            return_value=(),
+        ) as mock_align, patch.object(
+            self.mod,
+            "plot_record_section_and_stack",
+            return_value=None,
+        ) as mock_plot_record:
+            self.mod.run_pipeline()
+
+        mock_load.assert_not_called()
+        mock_prepare.assert_not_called()
+        mock_align.assert_not_called()
+        mock_plot_record.assert_not_called()
+
     def test_run_pipeline_skips_when_event_context_missing(self):
         with patch.object(self.mod, "events", ["E1"]), patch.object(self.mod, "all_channels", False), patch.object(
             self.mod,
