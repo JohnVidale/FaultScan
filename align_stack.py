@@ -2518,9 +2518,6 @@ def run_pipeline() -> None:
             all_component_data=all_component_data,
         )
 
-        # Pre-compute stations with zero R–T shift difference (for optional stacking)
-        zero_rt_diff_stations = None
-
         stack_by_comp, t_abs, mask = render_and_collect_three_component_stacks(
             all_component_data=all_component_data,
             comp_order=comp_order,
