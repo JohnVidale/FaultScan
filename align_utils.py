@@ -378,6 +378,43 @@ def compute_phase_travel_times(model_obj, event_depth: float, ref_trace, origin_
     return p_traveltime, s_traveltime, p_arrival_time, s_arrival_time, phase_traveltime
 
 
+def compute_taup_station_shifts(
+    model_obj,
+    st_comp,
+    event_depth: float,
+    align_phase_name: str,
+    t_ref,
+    timing_state: TimingState,
+) -> dict:
+    """Compute TauP time shifts per station relative to reference arrival time."""
+    calc_shifts = {}
+    if t_ref is None:
+        return calc_shifts
+
+    phase_key = align_phase_name.upper()
+    _taup_wall_start = time.perf_counter()
+    _taup_cpu_start = time.process_time()
+    for tr in st_comp:
+        station_id = str(tr.stats.station)
+        dist_deg = float(tr.stats.dist_deg)
+
+        tts_sta = model_obj.get_travel_times(
+            source_depth_in_km=event_depth,
+            distance_in_degree=dist_deg,
+            phase_list=[phase_key.lower(), phase_key.upper()],
+        )
+        t_sta = None
+        for tt in reversed(tts_sta):
+            if tt.phase.name.upper() == phase_key:
+                t_sta = float(tt.time)
+                break
+
+        if t_sta is not None:
+            calc_shifts[station_id] = t_sta - t_ref
+    add_stage_timing(timing_state, "taup_station_shifts", _taup_wall_start, _taup_cpu_start)
+    return calc_shifts
+
+
 def compute_stage1_aligned_stack(
     st_comp,
     ref: np.ndarray,

@@ -22,6 +22,7 @@ from align_utils import (
     compute_stage1_aligned_stack,
     compute_stage2_screened_stack,
     compute_stage3_finalized_rows,
+    compute_taup_station_shifts,
     compute_time_axis_and_stack,
     correlation_time_bounds,
     draw_correlation_markers,
@@ -297,29 +298,14 @@ def compute_alignment_products(
             tr.data = tr.data / mx
 
     # ---- Theoretical (TauP) shift per station relative to reference station ----
-    calc_shifts = {}
-    if t_ref is not None:
-        phase_key = align_phase_name.upper()
-        _taup_wall_start = time.perf_counter()
-        _taup_cpu_start = time.process_time()
-        for tr in st_comp:
-            station_id = str(tr.stats.station)
-            dist_deg = float(tr.stats.dist_deg)
-
-            tts_sta = model.get_travel_times(
-                source_depth_in_km=event_depth,
-                distance_in_degree=dist_deg,
-                phase_list=[phase_key.lower(), phase_key.upper()],
-            )
-            t_sta = None
-            for tt in reversed(tts_sta):
-                if tt.phase.name.upper() == phase_key:
-                    t_sta = float(tt.time)
-                    break
-
-            if t_sta is not None:
-                calc_shifts[station_id] = t_sta - t_ref
-        add_stage_timing(timing_state, "taup_station_shifts", _taup_wall_start, _taup_cpu_start)
+    calc_shifts = compute_taup_station_shifts(
+        model_obj=model,
+        st_comp=st_comp,
+        event_depth=event_depth,
+        align_phase_name=align_phase_name,
+        t_ref=t_ref,
+        timing_state=timing_state,
+    )
 
     # ===================== Stage 1: align to reference -> aligned_stack =====================
     aligned_stack = compute_stage1_aligned_stack(
