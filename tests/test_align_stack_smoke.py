@@ -45,6 +45,34 @@ class AlignStackSmokeTests(unittest.TestCase):
             )
         self.assertIsNone(out)
 
+    def test_prepare_reference_and_phase_timing_success(self):
+        fake_ref = object()
+        with patch.object(self.mod, "select_reference_trace", return_value=("STA", fake_ref)), patch.object(
+            self.mod,
+            "print_reference_summary",
+            return_value=None,
+        ), patch.object(
+            self.mod,
+            "compute_phase_travel_times",
+            return_value=(1.0, 2.0, 3.0, 4.0, 5.0),
+        ):
+            out = self.mod.prepare_reference_and_phase_timing(
+                st_comp=[fake_ref],
+                name2ll={"STA": (0.0, 0.0)},
+                raw_limits_by_station={},
+                event_depth=10.0,
+                origin=None,
+                align_phase_name="S",
+            )
+
+        self.assertIsNotNone(out)
+        self.assertEqual(len(out), 8)
+        self.assertEqual(out[0], "STA")
+        self.assertEqual(out[1], fake_ref)
+        self.assertEqual(out[2], 1.0)
+        self.assertEqual(out[3], 2.0)
+        self.assertEqual(out[7], 5.0)
+
     def test_prepare_stream_reference_context_returns_none_when_no_traces(self):
         fake_stream = []
         ref_phase_timing = ("STA", object(), 1.0, 2.0, None, None, 1.5, 1.5)
