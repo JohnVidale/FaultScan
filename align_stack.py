@@ -1551,6 +1551,13 @@ def plot_single_component_products(
     )
 
 
+def finalize_single_component_plotting(plot_wall_start: float, plot_cpu_start: float) -> None:
+    """Record timing and show figures for single-component plotting mode."""
+    add_stage_timing(timing_state, "plot_and_save", plot_wall_start, plot_cpu_start)
+    report_timing_once(timing_state)
+    plt.show()
+
+
 def store_three_component_data(
     all_component_data: dict,
     channel: str,
@@ -2030,11 +2037,8 @@ def run_pipeline() -> None:
                     name2ll=name2ll,
                 )
     
-                add_stage_timing(timing_state, "plot_and_save", _plot_wall_start, _plot_cpu_start)
-    
                 # Show figures for single-component mode
-                report_timing_once(timing_state)
-                plt.show()
+                finalize_single_component_plotting(_plot_wall_start, _plot_cpu_start)
     
     
     
