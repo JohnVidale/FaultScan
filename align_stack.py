@@ -2171,6 +2171,48 @@ def handle_single_component_outputs(
     finalize_single_component_plotting(plot_wall_start, plot_cpu_start)
 
 
+def setup_three_component_plot_run(
+    show_record: bool,
+    eve_id: str,
+    align_phase_name: str,
+    all_component_data: dict,
+):
+    """Build three-component figure and unpack shared plotting context."""
+    fig, gs = setup_three_component_record_figure(
+        show_record=show_record,
+        eve_id=eve_id,
+        align_phase_name=align_phase_name,
+    )
+
+    (
+        comp_order,
+        comp_titles,
+        eve_id,
+        align_phase,
+        start_time,
+        end_time,
+        t_abs,
+        mask,
+        sample_rate_env,
+        origin_env,
+    ) = get_three_component_plot_context(all_component_data)
+
+    return (
+        fig,
+        gs,
+        comp_order,
+        comp_titles,
+        eve_id,
+        align_phase,
+        start_time,
+        end_time,
+        t_abs,
+        mask,
+        sample_rate_env,
+        origin_env,
+    )
+
+
 def should_run_three_component_combined(process_as_three_comp: bool, all_component_data: dict) -> bool:
     """Return whether combined three-component plotting should execute."""
     return process_as_three_comp and len(all_component_data) == 3
@@ -2400,14 +2442,10 @@ def run_pipeline() -> None:
     if should_run_three_component_combined(process_as_three_comp, all_component_data):
         _plot3_wall_start, _plot3_cpu_start = start_plot_timing()
         print_three_component_banner()
-    
-        fig, gs = setup_three_component_record_figure(
-            show_record=show_record_section_plot,
-            eve_id=eve_id,
-            align_phase_name=align_phase,
-        )
-        
+
         (
+            fig,
+            gs,
             comp_order,
             comp_titles,
             eve_id,
@@ -2418,7 +2456,12 @@ def run_pipeline() -> None:
             mask,
             sample_rate_env,
             origin_env,
-        ) = get_three_component_plot_context(all_component_data)
+        ) = setup_three_component_plot_run(
+            show_record=show_record_section_plot,
+            eve_id=eve_id,
+            align_phase_name=align_phase,
+            all_component_data=all_component_data,
+        )
 
         # Pre-compute stations with zero R–T shift difference (for optional stacking)
         zero_rt_diff_stations = None
