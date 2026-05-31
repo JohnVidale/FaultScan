@@ -2106,6 +2106,71 @@ def maybe_plot_stage_stacks(
     )
 
 
+def handle_single_component_outputs(
+    record_fig,
+    save_dir: Path,
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    num_traces: int,
+    stack_vec,
+    sample_rate: float,
+    t_abs,
+    mask,
+    start_time,
+    end_time,
+    origin,
+    catalog_df,
+    calc_shifts: dict,
+    station_shifts: dict,
+    win_start,
+    win_end,
+    ref_window,
+    pass_window_ids: set,
+    snippet_by_station: dict,
+    selected_rows: list,
+    rejected_rows: list,
+    npts: int,
+    aligned_traces_by_station: dict,
+    name2ll: dict,
+    plot_wall_start: float,
+    plot_cpu_start: float,
+) -> None:
+    """Render and finalize single-component outputs for one event/component."""
+    # No Z-only R-T screening reuse.
+    plot_single_component_products(
+        record_fig=record_fig,
+        save_dir=save_dir,
+        eve_id=eve_id,
+        plot_comp=plot_comp,
+        align_phase_name=align_phase_name,
+        num_traces=num_traces,
+        stack_vec=stack_vec,
+        sample_rate=sample_rate,
+        t_abs=t_abs,
+        mask=mask,
+        start_time=start_time,
+        end_time=end_time,
+        origin=origin,
+        catalog_df=catalog_df,
+        calc_shifts=calc_shifts,
+        station_shifts=station_shifts,
+        win_start=win_start,
+        win_end=win_end,
+        ref_window=ref_window,
+        pass_window_ids=pass_window_ids,
+        snippet_by_station=snippet_by_station,
+        selected_rows=selected_rows,
+        rejected_rows=rejected_rows,
+        npts=npts,
+        aligned_traces_by_station=aligned_traces_by_station,
+        name2ll=name2ll,
+    )
+
+    # Show figures for single-component mode
+    finalize_single_component_plotting(plot_wall_start, plot_cpu_start)
+
+
 def should_run_three_component_combined(process_as_three_comp: bool, all_component_data: dict) -> bool:
     """Return whether combined three-component plotting should execute."""
     return process_as_three_comp and len(all_component_data) == 3
@@ -2298,9 +2363,7 @@ def run_pipeline() -> None:
                     t_ref=t_ref,
                 )
             else:
-                # Show individual plot in non-three-component mode
-                # No Z-only R–T screening reuse.
-                plot_single_component_products(
+                handle_single_component_outputs(
                     record_fig=record_fig,
                     save_dir=save_dir,
                     eve_id=eve_id,
@@ -2327,10 +2390,9 @@ def run_pipeline() -> None:
                     npts=npts,
                     aligned_traces_by_station=aligned_traces_by_station,
                     name2ll=name2ll,
+                    plot_wall_start=_plot_wall_start,
+                    plot_cpu_start=_plot_cpu_start,
                 )
-    
-                # Show figures for single-component mode
-                finalize_single_component_plotting(_plot_wall_start, _plot_cpu_start)
     
     
     
