@@ -1298,6 +1298,48 @@ def finalize_three_component_record_figure(fig, eve_id: str, align_phase_name: s
     # plt.show()  # defer until end
 
 
+def render_and_collect_three_component_stacks(
+    all_component_data: dict,
+    comp_order: list,
+    comp_titles: list,
+    show_record: bool,
+    fig,
+    gs,
+    start_time: float,
+    end_time: float,
+    t_abs,
+    mask,
+):
+    """Render enabled record-section panels and return stack vectors by component."""
+    stack_by_comp = {}
+
+    for idx, comp_name in enumerate(comp_order):
+        if comp_name not in all_component_data:
+            print(f"Warning: {comp_name} data not found")
+            continue
+
+        data = all_component_data[comp_name]
+        stack_vec = data["stack_vec"]
+        t_abs = data["t_abs"]
+        mask = data["mask"]
+
+        if show_record:
+            render_three_component_panel(
+                fig=fig,
+                gs=gs,
+                idx=idx,
+                comp_name=comp_name,
+                comp_titles=comp_titles,
+                data=data,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+        stack_by_comp[comp_name] = stack_vec
+
+    return stack_by_comp, t_abs, mask
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1757,35 +1799,23 @@ def run_pipeline() -> None:
     
         # Pre-compute stations with zero R–T shift difference (for optional stacking)
         zero_rt_diff_stations = None
-        stack_by_comp = {}
         t_abs = first_data['t_abs']
         mask = first_data['mask']
         sample_rate_env = first_data['sample_rate']
         origin_env = first_data.get('origin')
-        
-        for idx, comp_name in enumerate(comp_order):
-            if comp_name not in all_component_data:
-                print(f"Warning: {comp_name} data not found")
-                continue
-    
-            data = all_component_data[comp_name]
-            stack_vec = data['stack_vec']
-            t_abs = data['t_abs']
-            mask = data['mask']
-    
-            if show_record_section_plot:
-                render_three_component_panel(
-                    fig=fig,
-                    gs=gs,
-                    idx=idx,
-                    comp_name=comp_name,
-                    comp_titles=comp_titles,
-                    data=data,
-                    start_time=start_time,
-                    end_time=end_time,
-                )
-    
-            stack_by_comp[comp_name] = stack_vec
+
+        stack_by_comp, t_abs, mask = render_and_collect_three_component_stacks(
+            all_component_data=all_component_data,
+            comp_order=comp_order,
+            comp_titles=comp_titles,
+            show_record=show_record_section_plot,
+            fig=fig,
+            gs=gs,
+            start_time=start_time,
+            end_time=end_time,
+            t_abs=t_abs,
+            mask=mask,
+        )
     
         if all(comp in stack_by_comp for comp in comp_order):
             save_dir = make_event_output_dir(path_prefix, eve_id)
