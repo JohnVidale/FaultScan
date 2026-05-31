@@ -23,6 +23,8 @@ from align_utils import (
     draw_correlation_markers,
     ensure_utc_datetime,
     get_component_selection,
+    load_event_metadata,
+    load_station_lookup,
     make_event_output_dir,
     report_timing_once,
     resolve_component_key,
@@ -254,32 +256,6 @@ def plot_record_section_and_stack(
     fig.savefig(record_file, dpi=300, bbox_inches="tight")
     print(f"✓ Record-section plot saved to: {record_file}")
     return fig
-
-
-def load_event_metadata(eve_id: str, info_dir: Path):
-    """Load event row and return key metadata for one event id."""
-    eve_info = pd.read_csv(info_dir / "catalog_20220930_8events.csv")
-    row = eve_info.loc[eve_info["evid"] == eve_id].iloc[0]
-    event_depth = float(row["depth"])
-    eve_lat = float(row["latitude"])
-    eve_lon = float(row["longitude"])
-    origin = UTCDateTime(str(row["origin_time"]))
-    return event_depth, eve_lat, eve_lon, origin
-
-
-def load_station_lookup(info_dir: Path):
-    """Read station coordinates and return station->(lat, lon) lookup."""
-    station_file = info_dir / "stations.txt"
-    sta_info = np.genfromtxt(
-        station_file,
-        dtype=[("name", "U10"), ("lat", "f8"), ("lon", "f8")],
-        usecols=(0, 1, 2),
-        comments="#",
-    )
-    sta_name = np.array([s.decode() if hasattr(s, "decode") else s for s in sta_info["name"]])
-    sta_lat = sta_info["lat"]
-    sta_lon = sta_info["lon"]
-    return {sta_name[i]: (sta_lat[i], sta_lon[i]) for i in range(len(sta_name))}
 
 
 def read_waveforms_for_event(
