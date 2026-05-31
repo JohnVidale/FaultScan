@@ -1,6 +1,7 @@
 import importlib
 import unittest
 from unittest.mock import patch
+from unittest.mock import Mock
 
 
 class AlignStackSmokeTests(unittest.TestCase):
@@ -197,6 +198,44 @@ class AlignStackSmokeTests(unittest.TestCase):
         self.assertEqual(out[0], 10.0)
         self.assertEqual(out[6], fake_stream)
         self.assertEqual(out[7], fake_limits)
+
+    def test_select_component_stream_rotates_for_r_or_t(self):
+        fake_stream = object()
+        with patch.object(
+            self.mod,
+            "rotate_horizontals_to_component",
+            return_value=(fake_stream, "R"),
+        ) as mock_rotate:
+            out_stream, out_plot = self.mod.select_component_stream(
+                st_window=object(),
+                sel_comp="R",
+                channel="DPN",
+                name2ll={"STA": (0.0, 0.0)},
+                eve_lat=0.0,
+                eve_lon=0.0,
+            )
+
+        mock_rotate.assert_called_once()
+        self.assertIs(out_stream, fake_stream)
+        self.assertEqual(out_plot, "R")
+
+    def test_select_component_stream_uses_direct_channel_for_z(self):
+        st_window = Mock()
+        selected_stream = object()
+        st_window.select.return_value = selected_stream
+
+        out_stream, out_plot = self.mod.select_component_stream(
+            st_window=st_window,
+            sel_comp="Z",
+            channel="DPZ",
+            name2ll={"STA": (0.0, 0.0)},
+            eve_lat=0.0,
+            eve_lon=0.0,
+        )
+
+        st_window.select.assert_called_once_with(channel="DPZ")
+        self.assertIs(out_stream, selected_stream)
+        self.assertEqual(out_plot, "Z")
 
 
 if __name__ == "__main__":
