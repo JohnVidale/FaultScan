@@ -1578,35 +1578,6 @@ def print_three_component_banner() -> None:
     print(f"\n{'='*70}")
     print("Creating combined three-component plot...")
     print(f"{'='*70}\n")
-
-
-def unpack_alignment_products(alignment: dict):
-    """Return run_pipeline alignment outputs as a stable ordered tuple."""
-    return (
-        alignment["npts"],
-        alignment["sample_rate"],
-        alignment["move_limit_samples"],
-        alignment["win_start"],
-        alignment["win_end"],
-        alignment["calc_shifts"],
-        alignment["aligned_stack"],
-        alignment["selected_aligned_stack"],
-        alignment["selected_ids"],
-        alignment["station_corr"],
-        alignment["n_pass_window"],
-        alignment["pass_window_ids"],
-        alignment["snippet_by_station"],
-        alignment["ref_window"],
-        alignment["selected_rows"],
-        alignment["rejected_rows"],
-        alignment["station_shifts"],
-        alignment["aligned_traces_by_station"],
-        alignment["t_abs"],
-        alignment["mask"],
-        alignment["stack_vec"],
-    )
-
-
 def select_component_stream(
     st_window: Stream,
     sel_comp: str,
@@ -1800,7 +1771,29 @@ def run_alignment_and_unpack(
         align_phase_name=align_phase_name,
         t_ref=t_ref,
     )
-    return unpack_alignment_products(alignment)
+    return (
+        alignment["npts"],
+        alignment["sample_rate"],
+        alignment["move_limit_samples"],
+        alignment["win_start"],
+        alignment["win_end"],
+        alignment["calc_shifts"],
+        alignment["aligned_stack"],
+        alignment["selected_aligned_stack"],
+        alignment["selected_ids"],
+        alignment["station_corr"],
+        alignment["n_pass_window"],
+        alignment["pass_window_ids"],
+        alignment["snippet_by_station"],
+        alignment["ref_window"],
+        alignment["selected_rows"],
+        alignment["rejected_rows"],
+        alignment["station_shifts"],
+        alignment["aligned_traces_by_station"],
+        alignment["t_abs"],
+        alignment["mask"],
+        alignment["stack_vec"],
+    )
 
 
 def store_three_component_data(
