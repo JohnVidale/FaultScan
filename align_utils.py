@@ -590,6 +590,35 @@ def compute_stage3_finalized_rows(
     }
 
 
+def compute_time_axis_and_stack(
+    start_time: float,
+    end_time: float,
+    npts: int,
+    sample_rate: float,
+    aligned_bank_all: list,
+    win_start: int,
+    win_end: int,
+):
+    """Build time axis/mask and normalized final stack from aligned traces."""
+    t_abs = start_time + (np.arange(npts) / sample_rate)
+    mask = (t_abs >= start_time) & (t_abs <= end_time)
+
+    if len(aligned_bank_all) > 0:
+        stack_vec = np.mean(np.vstack(aligned_bank_all), axis=0)
+        win = stack_vec[win_start:win_end]
+        ms = np.max(np.abs(win)) if win.size > 0 else 1.0
+        if ms > 0:
+            stack_vec = stack_vec / ms
+    else:
+        stack_vec = np.zeros_like(t_abs)
+
+    return {
+        "t_abs": t_abs,
+        "mask": mask,
+        "stack_vec": stack_vec,
+    }
+
+
 def compute_lag(
     ref: np.ndarray,
     d: np.ndarray,

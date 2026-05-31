@@ -22,6 +22,7 @@ from align_utils import (
     compute_stage1_aligned_stack,
     compute_stage2_screened_stack,
     compute_stage3_finalized_rows,
+    compute_time_axis_and_stack,
     correlation_time_bounds,
     draw_correlation_markers,
     ensure_utc_datetime,
@@ -377,20 +378,19 @@ def compute_alignment_products(
     station_shifts = stage3_products["station_shifts"]
     aligned_traces_by_station = stage3_products["aligned_traces_by_station"]
 
-    # ---- Time axis (seconds since origin) ----
-    t_abs = start_time + (np.arange(npts) / sample_rate)
-    mask = (t_abs >= start_time) & (t_abs <= end_time)
-
-    # ---- Final stack (normalized) ----
-    bank = aligned_bank_all
-    if len(bank) > 0:
-        stack_vec = np.mean(np.vstack(bank), axis=0)
-        win = stack_vec[win_start:win_end]
-        ms = np.max(np.abs(win)) if win.size > 0 else 1.0
-        if ms > 0:
-            stack_vec = stack_vec / ms
-    else:
-        stack_vec = np.zeros_like(t_abs)
+    # ---- Time axis (seconds since origin) and final stack ----
+    axis_stack_products = compute_time_axis_and_stack(
+        start_time=start_time,
+        end_time=end_time,
+        npts=npts,
+        sample_rate=sample_rate,
+        aligned_bank_all=aligned_bank_all,
+        win_start=win_start,
+        win_end=win_end,
+    )
+    t_abs = axis_stack_products["t_abs"]
+    mask = axis_stack_products["mask"]
+    stack_vec = axis_stack_products["stack_vec"]
 
     return {
         "npts": npts,
