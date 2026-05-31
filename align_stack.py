@@ -1622,6 +1622,45 @@ def select_component_stream(
     return st_comp, plot_comp
 
 
+def prepare_reference_and_phase_timing(
+    st_comp: Stream,
+    name2ll: dict,
+    raw_limits_by_station,
+    event_depth: float,
+    origin,
+    align_phase_name: str,
+):
+    """Select reference trace, print summary, and compute phase timing for alignment."""
+    ref_station_id, ref_trace = select_reference_trace(st_comp, name2ll)
+    if ref_trace is None:
+        return None
+
+    print_reference_summary(ref_station_id, ref_trace, raw_limits_by_station)
+
+    p_traveltime, s_traveltime, p_arrival_time, s_arrival_time, phase_traveltime = compute_phase_travel_times(
+        model,
+        event_depth,
+        ref_trace,
+        origin,
+        align_phase_name,
+    )
+    if phase_traveltime is None:
+        print("    No valid phase for alignment. Skip array.")
+        return None
+
+    t_ref = phase_traveltime
+    return (
+        ref_station_id,
+        ref_trace,
+        p_traveltime,
+        s_traveltime,
+        p_arrival_time,
+        s_arrival_time,
+        phase_traveltime,
+        t_ref,
+    )
+
+
 def store_three_component_data(
     all_component_data: dict,
     channel: str,
@@ -1928,21 +1967,27 @@ def run_pipeline() -> None:
                 eve_lon=eve_lon,
             )
     
-            # ---- Auto-select reference station: closest to array center ----
-            ref_station_id, ref_trace = select_reference_trace(st_comp, name2ll)
-            if ref_trace is None:
-                continue
-            print_reference_summary(ref_station_id, ref_trace, raw_limits_by_station)
-    
-            # ---- Theoretical travel times (reference station) ----
-            p_traveltime, s_traveltime, p_arrival_time, s_arrival_time, phase_traveltime = compute_phase_travel_times(
-                model, event_depth, ref_trace, origin, align_phase
+            # ---- Auto-select reference station and phase timing ----
+            ref_phase_timing = prepare_reference_and_phase_timing(
+                st_comp=st_comp,
+                name2ll=name2ll,
+                raw_limits_by_station=raw_limits_by_station,
+                event_depth=event_depth,
+                origin=origin,
+                align_phase_name=align_phase,
             )
-            if phase_traveltime is None:
-                print("    No valid phase for alignment. Skip array.")
+            if ref_phase_timing is None:
                 continue
-            # Theoretical arrival time (reference station) used for reference in shift calculations/plots
-            t_ref = phase_traveltime
+            (
+                ref_station_id,
+                ref_trace,
+                p_traveltime,
+                s_traveltime,
+                p_arrival_time,
+                s_arrival_time,
+                phase_traveltime,
+                t_ref,
+            ) = ref_phase_timing
     
             num_traces = len(st_comp)
             print(f"    {num_traces} traces on {plot_comp}")
