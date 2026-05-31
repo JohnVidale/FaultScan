@@ -483,6 +483,52 @@ def plot_snippet_comparison(
         print(f"[WARN] Failed to create snippet comparison plot: {e}")
 
 
+def plot_station_pass_map(
+    aligned_traces_by_station: dict,
+    pass_window_ids: set,
+    name2ll: dict,
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    save_dir: Path,
+) -> None:
+    """Plot station locations colored by pass/fail screening status."""
+    try:
+        all_stations = sorted(aligned_traces_by_station.keys(), key=lambda s: int(s))
+        pass_win = set(pass_window_ids)
+
+        fig_map, axm = plt.subplots(1, 1, figsize=(6.5, 5.5))
+        set_figure_title(fig_map, f"{eve_id} {plot_comp} station pass map")
+        pass_lats = [name2ll[s][0] for s in all_stations if s in pass_win]
+        pass_lons = [name2ll[s][1] for s in all_stations if s in pass_win]
+        fail_lats = [name2ll[s][0] for s in all_stations if s not in pass_win]
+        fail_lons = [name2ll[s][1] for s in all_stations if s not in pass_win]
+
+        if len(fail_lons) > 0:
+            axm.scatter(fail_lons, fail_lats, s=18, c="0.7", label="Fail")
+        if len(pass_lons) > 0:
+            axm.scatter(pass_lons, pass_lats, s=22, c="C3", label="Pass")
+
+        axm.set_title("Pass r_win", fontsize=11, fontweight="bold")
+        axm.grid(alpha=0.3)
+        axm.set_xlabel("Longitude")
+        axm.set_ylabel("Latitude")
+        axm.legend(loc="upper right", fontsize=9)
+
+        fig_map.suptitle(
+            f"Event {eve_id} {plot_comp}: stations passing thresholds",
+            fontsize=13,
+            fontweight="bold",
+        )
+        plt.tight_layout()
+
+        map_file = save_dir / f"{eve_id}_{plot_comp}_station_pass_map_{align_phase_name}.png"
+        fig_map.savefig(map_file, dpi=300, bbox_inches="tight")
+        print(f"✓ Station pass/fail map saved to: {map_file}")
+    except Exception as e:
+        print(f"[WARN] Failed to create station pass/fail maps: {e}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -974,41 +1020,15 @@ def run_pipeline() -> None:
                         print(f"[WARN] Failed to create individual seismograms plot: {e}")
     
                 # ===================== Station maps: pass each threshold and both =====================
-                try:
-                    tr_map = aligned_traces_by_station
-                    all_stations = sorted(tr_map.keys(), key=lambda s: int(s))
-                    pass_win = set(pass_window_ids)
-    
-                    fig_map, axm = plt.subplots(1, 1, figsize=(6.5, 5.5))
-                    set_figure_title(fig_map, f"{eve_id} {plot_comp} station pass map")
-                    pass_lats = [name2ll[s][0] for s in all_stations if s in pass_win]
-                    pass_lons = [name2ll[s][1] for s in all_stations if s in pass_win]
-                    fail_lats = [name2ll[s][0] for s in all_stations if s not in pass_win]
-                    fail_lons = [name2ll[s][1] for s in all_stations if s not in pass_win]
-    
-                    if len(fail_lons) > 0:
-                        axm.scatter(fail_lons, fail_lats, s=18, c='0.7', label='Fail')
-                    if len(pass_lons) > 0:
-                        axm.scatter(pass_lons, pass_lats, s=22, c='C3', label='Pass')
-    
-                    axm.set_title('Pass r_win', fontsize=11, fontweight='bold')
-                    axm.grid(alpha=0.3)
-                    axm.set_xlabel('Longitude')
-                    axm.set_ylabel('Latitude')
-                    axm.legend(loc='upper right', fontsize=9)
-    
-                    fig_map.suptitle(
-                        f"Event {eve_id} {plot_comp}: stations passing thresholds",
-                        fontsize=13,
-                        fontweight='bold',
-                    )
-                    plt.tight_layout()
-    
-                    map_file = save_dir / f"{eve_id}_{plot_comp}_station_pass_map_{align_phase}.png"
-                    fig_map.savefig(map_file, dpi=300, bbox_inches='tight')
-                    print(f"✓ Station pass/fail map saved to: {map_file}")
-                except Exception as e:
-                    print(f"[WARN] Failed to create station pass/fail maps: {e}")
+                plot_station_pass_map(
+                    aligned_traces_by_station=aligned_traces_by_station,
+                    pass_window_ids=pass_window_ids,
+                    name2ll=name2ll,
+                    eve_id=eve_id,
+                    plot_comp=plot_comp,
+                    align_phase_name=align_phase,
+                    save_dir=save_dir,
+                )
     
                 add_stage_timing(timing_state, "plot_and_save", _plot_wall_start, _plot_cpu_start)
     
