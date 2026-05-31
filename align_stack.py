@@ -2049,13 +2049,8 @@ def run_pipeline() -> None:
         all_channels, component
     )
 
-    # Storage for three-component mode
-    if process_as_three_comp:
-        (
-            all_component_data,
-            horizontal_window_cache,
-            horizontal_raw_limits_cache,
-        ) = ({}, {}, {})
+    # Caches are harmless in single-component mode and simplify control flow.
+    all_component_data, horizontal_window_cache, horizontal_raw_limits_cache = {}, {}, {}
     
     for idx, channel in enumerate(channels):
         sel_comp = sel_comp_list[idx]
