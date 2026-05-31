@@ -1558,6 +1558,16 @@ def finalize_single_component_plotting(plot_wall_start: float, plot_cpu_start: f
     plt.show()
 
 
+def finalize_three_component_plotting(plot_wall_start: float, plot_cpu_start: float) -> None:
+    """Record timing and show figures for combined three-component plotting mode."""
+    add_stage_timing(timing_state, "plot_three_component", plot_wall_start, plot_cpu_start)
+    # Show all figures together (three-component + shift comparison)
+    # plt.show()
+    report_timing_once(timing_state)
+    print("\a\a\a")
+    plt.show()
+
+
 def unpack_alignment_products(alignment: dict):
     """Return run_pipeline alignment outputs as a stable ordered tuple."""
     return (
@@ -2145,15 +2155,7 @@ def run_pipeline() -> None:
             pass_window_ids=pass_window_ids,
         )
     
-        add_stage_timing(timing_state, "plot_three_component", _plot3_wall_start, _plot3_cpu_start)
-    
-            # Show all figures together (three-component + shift comparison)
-            # plt.show()
-    
-        # ===================== Show all figures together at the end =====================
-        report_timing_once(timing_state)
-        print("\a\a\a")
-        plt.show()
+        finalize_three_component_plotting(_plot3_wall_start, _plot3_cpu_start)
 
 def main() -> None:
     run_pipeline()
