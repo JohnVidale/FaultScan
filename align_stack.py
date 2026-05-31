@@ -1448,6 +1448,109 @@ def plot_three_component_summary_products(
     )
 
 
+def plot_single_component_products(
+    record_fig,
+    save_dir: Path,
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    num_traces: int,
+    stack_vec,
+    sample_rate: float,
+    t_abs,
+    mask,
+    start_time: float,
+    end_time: float,
+    origin,
+    catalog_df,
+    calc_shifts: dict,
+    station_shifts: dict,
+    win_start,
+    win_end,
+    ref_window,
+    pass_window_ids: set,
+    snippet_by_station: dict,
+    selected_rows: list,
+    rejected_rows: list,
+    npts: int,
+    aligned_traces_by_station: dict,
+    name2ll: dict,
+) -> None:
+    """Generate and show all single-component plots after alignment."""
+    save_file = save_dir / f"{eve_id}_{plot_comp}_{align_phase_name}.png"
+    if record_fig is not None:
+        record_fig.savefig(save_file, dpi=300, bbox_inches="tight")
+
+    plot_single_trace_log_envelope(
+        num_traces=num_traces,
+        stack_vec=stack_vec,
+        sample_rate=sample_rate,
+        t_abs=t_abs,
+        mask=mask,
+        start_time=start_time,
+        end_time=end_time,
+        eve_id=eve_id,
+        plot_comp=plot_comp,
+        align_phase_name=align_phase_name,
+        save_dir=save_dir,
+        origin=origin,
+        catalog_df=catalog_df,
+    )
+
+    plot_estimated_vs_calculated_shifts(
+        calc_shifts=calc_shifts,
+        station_shifts=station_shifts,
+        eve_id=eve_id,
+        plot_comp=plot_comp,
+        align_phase_name=align_phase_name,
+        save_dir=save_dir,
+    )
+
+    plot_snippet_comparison(
+        start_time=start_time,
+        win_start=win_start,
+        win_end=win_end,
+        sample_rate=sample_rate,
+        ref_window=ref_window,
+        pass_window_ids=pass_window_ids,
+        snippet_by_station=snippet_by_station,
+        eve_id=eve_id,
+        plot_comp=plot_comp,
+        align_phase_name=align_phase_name,
+        save_dir=save_dir,
+    )
+
+    plot_individual_seismograms_single_component(
+        show_individual_seismograms=show_individual_seismograms,
+        selected_rows=selected_rows,
+        rejected_rows=rejected_rows,
+        pass_window_ids=pass_window_ids,
+        t_abs=t_abs,
+        mask=mask,
+        stack_vec=stack_vec,
+        start_time=start_time,
+        win_start=win_start,
+        win_end=win_end,
+        sample_rate=sample_rate,
+        move_limit_sec=move_limit_sec,
+        npts=npts,
+        eve_id=eve_id,
+        plot_comp=plot_comp,
+        align_phase_name=align_phase_name,
+        save_dir=save_dir,
+    )
+
+    plot_station_pass_map(
+        aligned_traces_by_station=aligned_traces_by_station,
+        pass_window_ids=pass_window_ids,
+        name2ll=name2ll,
+        eve_id=eve_id,
+        plot_comp=plot_comp,
+        align_phase_name=align_phase_name,
+        save_dir=save_dir,
+    )
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1793,13 +1896,13 @@ def run_pipeline() -> None:
                     plt.close(record_fig)  # Close individual figure
             else:
                 # Show individual plot in non-three-component mode
-                # Save figure (same location/pattern as the original script)
-                save_file = save_dir / f"{eve_id}_{plot_comp}_{align_phase}.png"
-                if record_fig is not None:
-                    record_fig.savefig(save_file, dpi=300, bbox_inches="tight")
-    
-                # ===================== Log10 envelope plot (single trace) =====================
-                plot_single_trace_log_envelope(
+                # No Z-only R–T screening reuse.
+                plot_single_component_products(
+                    record_fig=record_fig,
+                    save_dir=save_dir,
+                    eve_id=eve_id,
+                    plot_comp=plot_comp,
+                    align_phase_name=align_phase,
                     num_traces=num_traces,
                     stack_vec=stack_vec,
                     sample_rate=sample_rate,
@@ -1807,70 +1910,20 @@ def run_pipeline() -> None:
                     mask=mask,
                     start_time=start_time,
                     end_time=end_time,
-                    eve_id=eve_id,
-                    plot_comp=plot_comp,
-                    align_phase_name=align_phase,
-                    save_dir=save_dir,
                     origin=origin,
                     catalog_df=catalog_local,
-                )
-    
-                # No Z-only R–T screening reuse.
-                # ===================== Estimated vs calculated shift plot (single component) =====================
-                plot_estimated_vs_calculated_shifts(
                     calc_shifts=calc_shifts,
                     station_shifts=station_shifts,
-                    eve_id=eve_id,
-                    plot_comp=plot_comp,
-                    align_phase_name=align_phase,
-                    save_dir=save_dir,
-                )
-    
-                # ===================== Snippet comparison plot (pass vs fail) =====================
-                plot_snippet_comparison(
-                    start_time=start_time,
                     win_start=win_start,
                     win_end=win_end,
-                    sample_rate=sample_rate,
                     ref_window=ref_window,
                     pass_window_ids=pass_window_ids,
                     snippet_by_station=snippet_by_station,
-                    eve_id=eve_id,
-                    plot_comp=plot_comp,
-                    align_phase_name=align_phase,
-                    save_dir=save_dir,
-                )
-    
-                # ===================== Individual seismograms (20 traces per subplot, 5 panels per figure) =====================
-                plot_individual_seismograms_single_component(
-                    show_individual_seismograms=show_individual_seismograms,
                     selected_rows=selected_rows,
                     rejected_rows=rejected_rows,
-                    pass_window_ids=pass_window_ids,
-                    t_abs=t_abs,
-                    mask=mask,
-                    stack_vec=stack_vec,
-                    start_time=start_time,
-                    win_start=win_start,
-                    win_end=win_end,
-                    sample_rate=sample_rate,
-                    move_limit_sec=move_limit_sec,
                     npts=npts,
-                    eve_id=eve_id,
-                    plot_comp=plot_comp,
-                    align_phase_name=align_phase,
-                    save_dir=save_dir,
-                )
-    
-                # ===================== Station maps: pass each threshold and both =====================
-                plot_station_pass_map(
                     aligned_traces_by_station=aligned_traces_by_station,
-                    pass_window_ids=pass_window_ids,
                     name2ll=name2ll,
-                    eve_id=eve_id,
-                    plot_comp=plot_comp,
-                    align_phase_name=align_phase,
-                    save_dir=save_dir,
                 )
     
                 add_stage_timing(timing_state, "plot_and_save", _plot_wall_start, _plot_cpu_start)
