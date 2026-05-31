@@ -1558,6 +1558,11 @@ def finalize_single_component_plotting(plot_wall_start: float, plot_cpu_start: f
     plt.show()
 
 
+def start_plot_timing():
+    """Return current wall-clock and CPU timestamps for plotting stages."""
+    return time.perf_counter(), time.process_time()
+
+
 def finalize_three_component_plotting(plot_wall_start: float, plot_cpu_start: float) -> None:
     """Record timing and show figures for combined three-component plotting mode."""
     add_stage_timing(timing_state, "plot_three_component", plot_wall_start, plot_cpu_start)
@@ -2046,8 +2051,7 @@ def run_pipeline() -> None:
             ) = unpack_alignment_products(alignment)
     
             # ---- Plot: superposition of Stage1/Stage2/Final stacks ----
-            _plot_wall_start = time.perf_counter()
-            _plot_cpu_start = time.process_time()
+            _plot_wall_start, _plot_cpu_start = start_plot_timing()
             if not all_channels:
                 plot_stage_stacks(
                     eve_id=eve_id,
@@ -2155,8 +2159,7 @@ def run_pipeline() -> None:
     
     # ===================== Three-component combined plotting =====================
     if process_as_three_comp and len(all_component_data) == 3:
-        _plot3_wall_start = time.perf_counter()
-        _plot3_cpu_start = time.process_time()
+        _plot3_wall_start, _plot3_cpu_start = start_plot_timing()
         print(f"\\n{'='*70}")
         print(f"Creating combined three-component plot...")
         print(f"{'='*70}\\n")
