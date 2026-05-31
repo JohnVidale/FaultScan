@@ -237,6 +237,69 @@ class AlignStackSmokeTests(unittest.TestCase):
         self.assertIs(out_stream, selected_stream)
         self.assertEqual(out_plot, "Z")
 
+    def test_run_alignment_and_unpack_tuple_order(self):
+        sentinel = {
+            "npts": 1,
+            "sample_rate": 2,
+            "move_limit_samples": 3,
+            "win_start": 4,
+            "win_end": 5,
+            "calc_shifts": 6,
+            "aligned_stack": 7,
+            "selected_aligned_stack": 8,
+            "selected_ids": 9,
+            "station_corr": 10,
+            "n_pass_window": 11,
+            "pass_window_ids": 12,
+            "snippet_by_station": 13,
+            "ref_window": 14,
+            "selected_rows": 15,
+            "rejected_rows": 16,
+            "station_shifts": 17,
+            "aligned_traces_by_station": 18,
+            "t_abs": 19,
+            "mask": 20,
+            "stack_vec": 21,
+        }
+        expected = tuple(sentinel[k] for k in (
+            "npts",
+            "sample_rate",
+            "move_limit_samples",
+            "win_start",
+            "win_end",
+            "calc_shifts",
+            "aligned_stack",
+            "selected_aligned_stack",
+            "selected_ids",
+            "station_corr",
+            "n_pass_window",
+            "pass_window_ids",
+            "snippet_by_station",
+            "ref_window",
+            "selected_rows",
+            "rejected_rows",
+            "station_shifts",
+            "aligned_traces_by_station",
+            "t_abs",
+            "mask",
+            "stack_vec",
+        ))
+
+        with patch.object(self.mod, "compute_alignment_products", return_value=sentinel):
+            out = self.mod.run_alignment_and_unpack(
+                st_comp=object(),
+                ref_trace=object(),
+                ref_station_id="1",
+                name2ll={"1": (0.0, 0.0)},
+                eve_lat=0.0,
+                eve_lon=0.0,
+                event_depth=10.0,
+                align_phase_name="P",
+                t_ref=1.0,
+            )
+
+        self.assertEqual(out, expected)
+
 
 if __name__ == "__main__":
     unittest.main()
