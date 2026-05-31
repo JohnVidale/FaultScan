@@ -1078,6 +1078,85 @@ Frequency content (bandpass):
     print(f"✓ Shift comparison plot saved to: {shift_file}")
 
 
+def plot_three_component_estimated_vs_calculated_shifts(
+    all_component_data: dict,
+    eve_id: str,
+    align_phase_name: str,
+    move_limit_sec: float,
+    save_dir: Path,
+) -> None:
+    """Plot estimated-vs-calculated shifts for Z/R/T components."""
+    print("Creating estimated vs calculated shift plot (3 components)...")
+
+    fig_ec, axes_ec = plt.subplots(1, 3, figsize=(15, 4.2), sharex=True, sharey=True)
+    set_figure_title(fig_ec, f"{eve_id} est vs calc shifts (3-comp)")
+    comp_order = ["DPZ", "R", "T"]
+    comp_titles_ec = ["Z", "R", "T"]
+
+    for j, comp_name in enumerate(comp_order):
+        axc = axes_ec[j]
+        if comp_name not in all_component_data:
+            axc.set_axis_off()
+            continue
+
+        data = all_component_data[comp_name]
+        station_shifts = data.get("station_shifts", {})
+        calc_shifts = data.get("calc_shifts", {})
+        pass_set = set(data.get("pass_window_ids", []))
+
+        common_sta = set(calc_shifts.keys()) & set(station_shifts.keys())
+        if len(common_sta) == 0:
+            axc.text(0.5, 0.5, "No common stations", ha="center", va="center")
+            axc.set_axis_off()
+            continue
+
+        stations = sorted(common_sta, key=lambda s: int(s))
+        est_shift = np.array([station_shifts[s]["lag_seconds"] for s in stations], dtype=float)
+        calc_shift = np.array([calc_shifts[s] for s in stations], dtype=float)
+        pass_mask = np.array([s in pass_set for s in stations], dtype=bool)
+        fail_mask = ~pass_mask
+
+        axc.scatter(calc_shift[pass_mask], est_shift[pass_mask], s=18, alpha=0.6, color="k", label="Pass r_win")
+        if np.any(fail_mask):
+            axc.scatter(calc_shift[fail_mask], est_shift[fail_mask], s=22, alpha=0.8, color="red", label="Fail r_win")
+
+        minv = float(min(np.min(calc_shift), np.min(est_shift)))
+        maxv = float(max(np.max(calc_shift), np.max(est_shift)))
+        axc.plot([minv, maxv], [minv, maxv], "r--", lw=1.2, alpha=0.7)
+        axc.plot(
+            [minv, maxv],
+            [minv + move_limit_sec, maxv + move_limit_sec],
+            color="0.4",
+            linestyle=":",
+            lw=1.2,
+        )
+        axc.plot(
+            [minv, maxv],
+            [minv - move_limit_sec, maxv - move_limit_sec],
+            color="0.4",
+            linestyle=":",
+            lw=1.2,
+        )
+
+        axc.set_title(comp_titles_ec[j], fontsize=12, fontweight="bold")
+        axc.grid(alpha=0.3)
+        axc.set_xlabel("Calculated shift (s)", fontsize=10)
+        if j == 0:
+            axc.set_ylabel("Estimated shift (s)", fontsize=10)
+        axc.legend(loc="upper left", fontsize=8)
+
+        fig_ec.suptitle(
+            f"Event {eve_id} - Estimated vs Calculated shifts ({align_phase_name})",
+            fontsize=13,
+            fontweight="bold",
+        )
+        plt.tight_layout()
+
+        estcalc_file = save_dir / f"{eve_id}_est_vs_calc_shift_{align_phase_name}.png"
+        fig_ec.savefig(estcalc_file, dpi=300, bbox_inches="tight")
+        print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1751,75 +1830,13 @@ def run_pipeline() -> None:
         )
     
         # ===================== Estimated vs calculated shift plot (3 components) =====================
-        print("Creating estimated vs calculated shift plot (3 components)...")
-    
-        fig_ec, axes_ec = plt.subplots(1, 3, figsize=(15, 4.2), sharex=True, sharey=True)
-        set_figure_title(fig_ec, f"{eve_id} est vs calc shifts (3-comp)")
-        comp_order = ['DPZ', 'R', 'T']
-        comp_titles_ec = ['Z', 'R', 'T']
-    
-        for j, comp_name in enumerate(comp_order):
-            axc = axes_ec[j]
-            if comp_name not in all_component_data:
-                axc.set_axis_off()
-                continue
-    
-            data = all_component_data[comp_name]
-            station_shifts = data.get('station_shifts', {})
-            calc_shifts = data.get('calc_shifts', {})
-            pass_set = set(data.get('pass_window_ids', []))
-    
-            common_sta = set(calc_shifts.keys()) & set(station_shifts.keys())
-            if len(common_sta) == 0:
-                axc.text(0.5, 0.5, 'No common stations', ha='center', va='center')
-                axc.set_axis_off()
-                continue
-    
-            stations = sorted(common_sta, key=lambda s: int(s))
-            est_shift = np.array([station_shifts[s]['lag_seconds'] for s in stations], dtype=float)
-            calc_shift = np.array([calc_shifts[s] for s in stations], dtype=float)
-            pass_mask = np.array([s in pass_set for s in stations], dtype=bool)
-            fail_mask = ~pass_mask
-    
-            axc.scatter(calc_shift[pass_mask], est_shift[pass_mask], s=18, alpha=0.6, color='k', label='Pass r_win')
-            if np.any(fail_mask):
-                axc.scatter(calc_shift[fail_mask], est_shift[fail_mask], s=22, alpha=0.8, color='red', label='Fail r_win')
-    
-            minv = float(min(np.min(calc_shift), np.min(est_shift)))
-            maxv = float(max(np.max(calc_shift), np.max(est_shift)))
-            axc.plot([minv, maxv], [minv, maxv], 'r--', lw=1.2, alpha=0.7)
-            axc.plot(
-                [minv, maxv],
-                [minv + move_limit_sec, maxv + move_limit_sec],
-                color='0.4',
-                linestyle=':',
-                lw=1.2,
-            )
-            axc.plot(
-                [minv, maxv],
-                [minv - move_limit_sec, maxv - move_limit_sec],
-                color='0.4',
-                linestyle=':',
-                lw=1.2,
-            )
-    
-            axc.set_title(comp_titles_ec[j], fontsize=12, fontweight='bold')
-            axc.grid(alpha=0.3)
-            axc.set_xlabel('Calculated shift (s)', fontsize=10)
-            if j == 0:
-                axc.set_ylabel('Estimated shift (s)', fontsize=10)
-            axc.legend(loc='upper left', fontsize=8)
-    
-            fig_ec.suptitle(
-                f'Event {eve_id} - Estimated vs Calculated shifts ({align_phase})',
-                fontsize=13,
-                fontweight='bold'
-            )
-            plt.tight_layout()
-    
-            estcalc_file = save_dir / f"{eve_id}_est_vs_calc_shift_{align_phase}.png"
-            fig_ec.savefig(estcalc_file, dpi=300, bbox_inches='tight')
-            print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
+        plot_three_component_estimated_vs_calculated_shifts(
+            all_component_data=all_component_data,
+            eve_id=eve_id,
+            align_phase_name=align_phase,
+            move_limit_sec=move_limit_sec,
+            save_dir=save_dir,
+        )
     
         add_stage_timing(timing_state, "plot_three_component", _plot3_wall_start, _plot3_cpu_start)
     
