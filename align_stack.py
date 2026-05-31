@@ -270,6 +270,66 @@ def plot_record_section_and_stack(
     return fig
 
 
+def plot_three_component_log_envelope(
+    comp_order: list,
+    stack_by_comp: dict,
+    sample_rate_env: float,
+    t_abs: np.ndarray,
+    mask: np.ndarray,
+    start_time: float,
+    end_time: float,
+    eve_id: str,
+    align_phase_name: str,
+    save_dir: Path,
+    origin_env,
+    catalog_df,
+) -> None:
+    """Plot and save log10 RMS envelope for combined three-component stacks."""
+    try:
+        if all(comp in stack_by_comp for comp in comp_order):
+            z = stack_by_comp["DPZ"]
+            r = stack_by_comp["R"]
+            t = stack_by_comp["T"]
+            env_z = np.abs(hilbert(z))
+            env_r = np.abs(hilbert(r))
+            env_t = np.abs(hilbert(t))
+            env_rms = np.sqrt((env_z ** 2 + env_r ** 2 + env_t ** 2) / 3.0)
+            std_sec = 1.0
+            std_samples = max(1.0, float(sample_rate_env) * std_sec)
+            win_samples = max(3, int(round(6.0 * std_samples)))
+            gauss = gaussian(win_samples, std_samples)
+            gauss = gauss / np.sum(gauss)
+            env_rms_smooth = np.convolve(env_rms, gauss, mode="same")
+            log_env = np.log10(np.maximum(env_rms_smooth, 1e-12))
+
+            fig_env, ax_env = plt.subplots(figsize=(12, 4.5))
+            set_figure_title(fig_env, f"{eve_id} 3-comp log10 envelope")
+            ax_env.plot(t_abs[mask], log_env[mask], color="k", lw=1.5)
+            ax_env.set_xlim(start_time, end_time)
+            ax_env.set_xlabel("Time since origin (s)", fontsize=11)
+            ax_env.set_ylabel("log10 envelope", fontsize=11)
+            ax_env.set_title(
+                f"Event {eve_id} - log10 RMS envelope of 3-component stack",
+                fontsize=12,
+                fontweight="bold",
+            )
+            ax_env.grid(alpha=0.2)
+            add_catalog_event_lines(ax_env, origin_env, catalog_df, start_time, end_time)
+            fig_env.subplots_adjust(bottom=0.28)
+
+            if origin_env is not None:
+                try:
+                    add_utc_time_axis(ax_env, origin_env)
+                except Exception as e:
+                    print(f"[WARN] Failed to add UTC time axis (envelope): {e}")
+
+            env_file = save_dir / f"{eve_id}_3comp_log10_envelope_{align_phase_name}.png"
+            fig_env.savefig(env_file, dpi=300, bbox_inches="tight")
+            print(f"✓ Log10 envelope plot saved to: {env_file}")
+    except Exception as e:
+        print(f"[WARN] Failed to create log10 envelope plot: {e}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1057,49 +1117,20 @@ def run_pipeline() -> None:
             # plt.show()  # defer until end
     
         # ===================== Log10 envelope of 3-component stack =====================
-        try:
-            if all(comp in stack_by_comp for comp in comp_order):
-                z = stack_by_comp['DPZ']
-                r = stack_by_comp['R']
-                t = stack_by_comp['T']
-                env_z = np.abs(hilbert(z))
-                env_r = np.abs(hilbert(r))
-                env_t = np.abs(hilbert(t))
-                env_rms = np.sqrt((env_z ** 2 + env_r ** 2 + env_t ** 2) / 3.0)
-                std_sec = 1.0
-                std_samples = max(1.0, float(sample_rate_env) * std_sec)
-                win_samples = max(3, int(round(6.0 * std_samples)))
-                gauss = gaussian(win_samples, std_samples)
-                gauss = gauss / np.sum(gauss)
-                env_rms_smooth = np.convolve(env_rms, gauss, mode='same')
-                log_env = np.log10(np.maximum(env_rms_smooth, 1e-12))
-    
-                fig_env, ax_env = plt.subplots(figsize=(12, 4.5))
-                set_figure_title(fig_env, f"{eve_id} 3-comp log10 envelope")
-                ax_env.plot(t_abs[mask], log_env[mask], color='k', lw=1.5)
-                ax_env.set_xlim(start_time, end_time)
-                ax_env.set_xlabel('Time since origin (s)', fontsize=11)
-                ax_env.set_ylabel('log10 envelope', fontsize=11)
-                ax_env.set_title(
-                    f'Event {eve_id} - log10 RMS envelope of 3-component stack',
-                    fontsize=12,
-                    fontweight='bold',
-                )
-                ax_env.grid(alpha=0.2)
-                add_catalog_event_lines(ax_env, origin_env, catalog_local, start_time, end_time)
-                fig_env.subplots_adjust(bottom=0.28)
-    
-                if origin_env is not None:
-                    try:
-                        add_utc_time_axis(ax_env, origin_env)
-                    except Exception as e:
-                        print(f"[WARN] Failed to add UTC time axis (envelope): {e}")
-    
-                env_file = save_dir / f"{eve_id}_3comp_log10_envelope_{align_phase}.png"
-                fig_env.savefig(env_file, dpi=300, bbox_inches='tight')
-                print(f"✓ Log10 envelope plot saved to: {env_file}")
-        except Exception as e:
-            print(f"[WARN] Failed to create log10 envelope plot: {e}")
+        plot_three_component_log_envelope(
+            comp_order=comp_order,
+            stack_by_comp=stack_by_comp,
+            sample_rate_env=sample_rate_env,
+            t_abs=t_abs,
+            mask=mask,
+            start_time=start_time,
+            end_time=end_time,
+            eve_id=eve_id,
+            align_phase_name=align_phase,
+            save_dir=save_dir,
+            origin_env=origin_env,
+            catalog_df=catalog_local,
+        )
     
         # No R–T zero-diff station list saved.
         # ===================== Stack compare plot: all aligned vs r_min-selected =====================
