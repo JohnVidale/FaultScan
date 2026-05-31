@@ -740,6 +740,128 @@ def plot_three_component_stack_compare(
     print(f"✓ Stack comparison plot saved to: {cmp_file}")
 
 
+def plot_individual_seismograms_three_components(
+    show_individual_seismograms: bool,
+    all_component_data: dict,
+    pass_window_ids: set,
+    start_time: float,
+    eve_id: str,
+    align_phase_name: str,
+    save_dir: Path,
+) -> None:
+    """Plot individual seismograms for Z/R/T components in paged panels."""
+    if not show_individual_seismograms:
+        return
+    try:
+        for comp_name, comp_title in zip(["DPZ", "R", "T"], ["Z", "R", "T"]):
+            if comp_name not in all_component_data:
+                continue
+
+            data = all_component_data[comp_name]
+            all_rows = data.get("all_rows", [])
+            all_rows = sorted(all_rows, key=lambda t: int(t[1]))
+            t_abs = data["t_abs"]
+            mask = data["mask"]
+            sample_rate = data["sample_rate"]
+            win_start = data["win_start"]
+            win_end = data["win_end"]
+            move_limit_sec = data["move_limit_sec"]
+            npts = data["npts"]
+
+            n_traces = len(all_rows)
+            if n_traces == 0:
+                continue
+
+            n_per = 20
+            panels_per_fig = 5
+            n_panels = int(np.ceil(n_traces / n_per))
+            n_figs = int(np.ceil(n_panels / panels_per_fig))
+
+            for fig_idx in range(n_figs):
+                panel_start = fig_idx * panels_per_fig
+                panel_end = min((fig_idx + 1) * panels_per_fig, n_panels)
+                panels_in_fig = panel_end - panel_start
+
+                fig_ind, axes_ind = plt.subplots(
+                    panels_in_fig,
+                    1,
+                    figsize=(10, 2.2 * panels_in_fig),
+                    sharex=True,
+                    sharey=False,
+                )
+                set_figure_title(
+                    fig_ind,
+                    f"{eve_id} {comp_title} individual seismograms fig {fig_idx + 1}",
+                )
+                if panels_in_fig == 1:
+                    axes_ind = [axes_ind]
+
+                for p in range(panels_in_fig):
+                    axp = axes_ind[p]
+                    global_panel = panel_start + p
+                    start_idx = global_panel * n_per
+                    end_idx = min((global_panel + 1) * n_per, n_traces)
+                    subset = all_rows[start_idx:end_idx]
+
+                    t_win_start = start_time + (win_start / sample_rate)
+                    t_win_end = start_time + (win_end / sample_rate)
+                    t_explore_start = max(start_time, t_win_start - move_limit_sec)
+                    t_explore_end = min(start_time + (npts / sample_rate), t_win_end + move_limit_sec)
+                    axp.axvline(x=t_win_start, color="y", lw=1.2, alpha=0.9)
+                    axp.axvline(x=t_win_end, color="y", lw=1.2, alpha=0.9)
+                    axp.axvline(x=t_explore_start, color="g", lw=1.2, alpha=0.9)
+                    axp.axvline(x=t_explore_end, color="g", lw=1.2, alpha=0.9)
+
+                    for idx_in_subset, (_, station_id, y) in enumerate(subset):
+                        i = (len(subset) - 1) - idx_in_subset
+                        passed_win = station_id in pass_window_ids
+                        trace_color = "k" if passed_win else "red"
+                        axp.plot(
+                            t_abs[mask],
+                            y[mask] + i,
+                            color=trace_color,
+                            lw=0.7,
+                        )
+                        axp.text(
+                            t_abs[mask][0],
+                            i,
+                            station_id,
+                            fontsize=6,
+                            va="center",
+                        )
+
+                    ref_offset = len(subset) + 1
+                    stack_ref = data.get("stack_vec", None)
+                    if stack_ref is not None:
+                        axp.plot(
+                            t_abs[mask],
+                            stack_ref[mask] + ref_offset,
+                            color="C3",
+                            lw=1.2,
+                        )
+
+                    axp.set_ylim(-1, len(subset) + 2)
+                    axp.grid(alpha=0.2)
+                    axp.set_ylabel("Trace index")
+
+                axes_ind[-1].set_xlabel("Time since origin (s)")
+                fig_ind.suptitle(
+                    f"Event {eve_id} {comp_title}: individual seismograms "
+                    f"(20 per panel, fig {fig_idx + 1}/{n_figs})",
+                    fontsize=12,
+                    fontweight="bold",
+                )
+                plt.tight_layout()
+
+                ind_file = save_dir / (
+                    f"{eve_id}_{comp_title}_individual_seismograms_{align_phase_name}_fig{fig_idx + 1}.png"
+                )
+                fig_ind.savefig(ind_file, dpi=300, bbox_inches="tight")
+                print(f"✓ Individual seismograms plot saved to: {ind_file}")
+    except Exception as e:
+        print(f"[WARN] Failed to create individual seismograms plots (3 components): {e}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1379,117 +1501,15 @@ def run_pipeline() -> None:
         )
     
         # ===================== Individual seismograms (20 traces per subplot, 5 panels per figure, 3 components) =====================
-        if show_individual_seismograms:
-            try:
-                for comp_name, comp_title in zip(['DPZ', 'R', 'T'], ['Z', 'R', 'T']):
-                    if comp_name not in all_component_data:
-                        continue
-    
-                    data = all_component_data[comp_name]
-                    all_rows = data.get('all_rows', [])
-                    all_rows = sorted(all_rows, key=lambda t: int(t[1]))
-                    t_abs = data['t_abs']
-                    mask = data['mask']
-                    sample_rate = data['sample_rate']
-                    win_start = data['win_start']
-                    win_end = data['win_end']
-                    move_limit_sec = data['move_limit_sec']
-                    npts = data['npts']
-    
-                    n_traces = len(all_rows)
-                    if n_traces == 0:
-                        continue
-    
-                    n_per = 20
-                    panels_per_fig = 5
-                    n_panels = int(np.ceil(n_traces / n_per))
-                    n_figs = int(np.ceil(n_panels / panels_per_fig))
-    
-                    for fig_idx in range(n_figs):
-                        panel_start = fig_idx * panels_per_fig
-                        panel_end = min((fig_idx + 1) * panels_per_fig, n_panels)
-                        panels_in_fig = panel_end - panel_start
-    
-                        fig_ind, axes_ind = plt.subplots(
-                            panels_in_fig,
-                            1,
-                            figsize=(10, 2.2 * panels_in_fig),
-                            sharex=True,
-                            sharey=False,
-                        )
-                        set_figure_title(
-                            fig_ind,
-                            f"{eve_id} {comp_title} individual seismograms fig {fig_idx + 1}",
-                        )
-                        if panels_in_fig == 1:
-                            axes_ind = [axes_ind]
-    
-                        for p in range(panels_in_fig):
-                            axp = axes_ind[p]
-                            global_panel = panel_start + p
-                            start_idx = global_panel * n_per
-                            end_idx = min((global_panel + 1) * n_per, n_traces)
-                            subset = all_rows[start_idx:end_idx]
-    
-                            # Thresholding windows
-                            t_win_start = start_time + (win_start / sample_rate)
-                            t_win_end = start_time + (win_end / sample_rate)
-                            t_explore_start = max(start_time, t_win_start - move_limit_sec)
-                            t_explore_end = min(start_time + (npts / sample_rate), t_win_end + move_limit_sec)
-                            axp.axvline(x=t_win_start, color='y', lw=1.2, alpha=0.9)
-                            axp.axvline(x=t_win_end, color='y', lw=1.2, alpha=0.9)
-                            axp.axvline(x=t_explore_start, color='g', lw=1.2, alpha=0.9)
-                            axp.axvline(x=t_explore_end, color='g', lw=1.2, alpha=0.9)
-    
-                            for idx_in_subset, (_, station_id, y) in enumerate(subset):
-                                i = (len(subset) - 1) - idx_in_subset
-                                passed_win = station_id in pass_window_ids
-                                trace_color = 'k' if passed_win else 'red'
-                                axp.plot(
-                                    t_abs[mask],
-                                    y[mask] + i,
-                                    color=trace_color,
-                                    lw=0.7,
-                                )
-                                axp.text(
-                                    t_abs[mask][0],
-                                    i,
-                                    station_id,
-                                    fontsize=6,
-                                    va='center',
-                                )
-    
-                            # Reference stack above traces
-                            ref_offset = len(subset) + 1
-                            stack_ref = data.get('stack_vec', None)
-                            if stack_ref is not None:
-                                axp.plot(
-                                    t_abs[mask],
-                                    stack_ref[mask] + ref_offset,
-                                    color='C3',
-                                    lw=1.2,
-                                )
-    
-                            axp.set_ylim(-1, len(subset) + 2)
-                            axp.grid(alpha=0.2)
-                            axp.set_ylabel('Trace index')
-    
-                        axes_ind[-1].set_xlabel('Time since origin (s)')
-                        fig_ind.suptitle(
-                            f"Event {eve_id} {comp_title}: individual seismograms "
-                            f"(20 per panel, fig {fig_idx + 1}/{n_figs})",
-                            fontsize=12,
-                            fontweight='bold',
-                        )
-                        plt.tight_layout()
-    
-                        ind_file = save_dir / (
-                            f"{eve_id}_{comp_title}_individual_seismograms_{align_phase}_fig{fig_idx + 1}.png"
-                        )
-                        fig_ind.savefig(ind_file, dpi=300, bbox_inches='tight')
-                        print(f"✓ Individual seismograms plot saved to: {ind_file}")
-            except Exception as e:
-                print(f"[WARN] Failed to create individual seismograms plots (3 components): {e}")
+        plot_individual_seismograms_three_components(
+            show_individual_seismograms=show_individual_seismograms,
+            all_component_data=all_component_data,
+            pass_window_ids=pass_window_ids,
+            start_time=start_time,
+            eve_id=eve_id,
+            align_phase_name=align_phase,
+            save_dir=save_dir,
+        )
     
         # ===================== Station maps: pass r_win (3 components) =====================
         try:
