@@ -1595,6 +1595,33 @@ def unpack_alignment_products(alignment: dict):
     )
 
 
+def select_component_stream(
+    st_window: Stream,
+    sel_comp: str,
+    channel: str,
+    name2ll: dict,
+    eve_lat: float,
+    eve_lon: float,
+):
+    """Return selected component stream and plot label, rotating to R/T when requested."""
+    plot_comp = sel_comp
+
+    if sel_comp in ("R", "T"):
+        print("Rotating horizontal components (N/E) to R/T ...")
+        st_comp, plot_comp = rotate_horizontals_to_component(
+            st_window=st_window,
+            sel_comp=sel_comp,
+            name2ll=name2ll,
+            eve_lat=eve_lat,
+            eve_lon=eve_lon,
+            timing_state=timing_state,
+        )
+    else:
+        st_comp = st_window.select(channel=channel)
+
+    return st_comp, plot_comp
+
+
 def store_three_component_data(
     all_component_data: dict,
     channel: str,
@@ -1892,22 +1919,14 @@ def run_pipeline() -> None:
             if st_window is None:
                 continue
     
-            # Label to show on the figure
-            plot_comp = sel_comp
-    
-            # ---- Rotate horizontal components to R/T ----
-            if sel_comp in ("R", "T"):
-                print("Rotating horizontal components (N/E) to R/T ...")
-                st_comp, plot_comp = rotate_horizontals_to_component(
-                    st_window=st_window,
-                    sel_comp=sel_comp,
-                    name2ll=name2ll,
-                    eve_lat=eve_lat,
-                    eve_lon=eve_lon,
-                    timing_state=timing_state,
-                )
-            else:
-                st_comp = st_window.select(channel=channel)
+            st_comp, plot_comp = select_component_stream(
+                st_window=st_window,
+                sel_comp=sel_comp,
+                channel=channel,
+                name2ll=name2ll,
+                eve_lat=eve_lat,
+                eve_lon=eve_lon,
+            )
     
             # ---- Auto-select reference station: closest to array center ----
             ref_station_id, ref_trace = select_reference_trace(st_comp, name2ll)
