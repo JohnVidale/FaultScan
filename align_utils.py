@@ -188,6 +188,29 @@ def build_alignment_products_payload(
     }
 
 
+def write_component_stack_mseeds(
+    comp_order: list,
+    stack_by_comp: dict,
+    save_dir: Path,
+    eve_id: str,
+    origin_env,
+    start_time: float,
+    sample_rate_env: float,
+) -> None:
+    """Write one stack MSEED per component for combined three-component outputs."""
+    for comp_name in comp_order:
+        stack_vec = stack_by_comp[comp_name]
+        tr = Trace(data=stack_vec.astype(np.float32, copy=False))
+        tr.stats.starttime = origin_env + start_time
+        tr.stats.sampling_rate = float(sample_rate_env)
+        tr.stats.station = "STACK"
+        tr.stats.channel = comp_name
+        st_out = Stream(traces=[tr])
+        out_file = save_dir / f"{eve_id}_{comp_name}_stack.mseed"
+        st_out.write(str(out_file), format="MSEED")
+        print(f"✓ Wrote stack mseed: {out_file}")
+
+
 def make_event_output_dir(base_prefix: str, eve_id: str) -> Path:
     """Create and return output directory for one event."""
     save_path = Path(base_prefix + "output")

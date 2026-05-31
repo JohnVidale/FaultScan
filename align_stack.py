@@ -42,6 +42,7 @@ from align_utils import (
     preprocess_traces_bandpass,
     set_figure_title,
     TimingState,
+    write_component_stack_mseeds,
 )
 
 min_freq, max_freq            = 3.0, 10.0 # Bandpass filter (Hz)
@@ -1032,30 +1033,23 @@ def run_pipeline() -> None:
             stack_by_comp[comp_name] = stack_vec
     
         if all(comp in stack_by_comp for comp in comp_order):
-            save_path = Path(path_prefix + "output")
-            save_dir = save_path / eve_id
-            save_dir.mkdir(parents=True, exist_ok=True)
-    
-            for comp_name in comp_order:
-                stack_vec = stack_by_comp[comp_name]
-                tr = Trace(data=stack_vec.astype(np.float32, copy=False))
-                tr.stats.starttime = origin_env + start_time
-                tr.stats.sampling_rate = float(sample_rate_env)
-                tr.stats.station = "STACK"
-                tr.stats.channel = comp_name
-                st_out = Stream(traces=[tr])
-                out_file = save_dir / f"{eve_id}_{comp_name}_stack.mseed"
-                st_out.write(str(out_file), format="MSEED")
-                print(f"✓ Wrote stack mseed: {out_file}")
+            save_dir = make_event_output_dir(path_prefix, eve_id)
+            write_component_stack_mseeds(
+                comp_order=comp_order,
+                stack_by_comp=stack_by_comp,
+                save_dir=save_dir,
+                eve_id=eve_id,
+                origin_env=origin_env,
+                start_time=start_time,
+                sample_rate_env=sample_rate_env,
+            )
     
         if show_record_section_plot:
             fig.suptitle(f'Event {eve_id} - Aligned {align_phase} waveforms (3 components)',
                         fontsize=14, fontweight='bold')
     
             # Save combined figure
-            save_path = Path(path_prefix + "output")
-            save_dir = save_path / eve_id
-            save_dir.mkdir(parents=True, exist_ok=True)
+            save_dir = make_event_output_dir(path_prefix, eve_id)
             save_file = save_dir / f"{eve_id}_3comp_{align_phase}.png"
             fig.savefig(save_file, dpi=300, bbox_inches='tight')
             print(f"\n✓ Three-component plot saved to: {save_file}")
