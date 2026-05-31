@@ -1340,6 +1340,35 @@ def render_and_collect_three_component_stacks(
     return stack_by_comp, t_abs, mask
 
 
+def get_three_component_plot_context(all_component_data: dict):
+    """Return shared context values used by combined 3-component plotting/output."""
+    comp_order = ["DPZ", "R", "T"]
+    comp_titles = ["Vertical (Z)", "Radial (R)", "Transverse (T)"]
+
+    first_data = all_component_data[comp_order[0]]
+    eve_id = first_data["eve_id"]
+    align_phase_name = first_data["align_phase"]
+    start_time_local = first_data["start_time"]
+    end_time_local = first_data["end_time"]
+    t_abs = first_data["t_abs"]
+    mask = first_data["mask"]
+    sample_rate_env = first_data["sample_rate"]
+    origin_env = first_data.get("origin")
+
+    return (
+        comp_order,
+        comp_titles,
+        eve_id,
+        align_phase_name,
+        start_time_local,
+        end_time_local,
+        t_abs,
+        mask,
+        sample_rate_env,
+        origin_env,
+    )
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1787,22 +1816,21 @@ def run_pipeline() -> None:
             align_phase_name=align_phase,
         )
         
-        comp_order = ['DPZ', 'R', 'T']
-        comp_titles = ['Vertical (Z)', 'Radial (R)', 'Transverse (T)']
-        
-        # Get common parameters
-        first_data = all_component_data[comp_order[0]]
-        eve_id = first_data['eve_id']
-        align_phase = first_data['align_phase']
-        start_time = first_data['start_time']
-        end_time = first_data['end_time']
-    
+        (
+            comp_order,
+            comp_titles,
+            eve_id,
+            align_phase,
+            start_time,
+            end_time,
+            t_abs,
+            mask,
+            sample_rate_env,
+            origin_env,
+        ) = get_three_component_plot_context(all_component_data)
+
         # Pre-compute stations with zero R–T shift difference (for optional stacking)
         zero_rt_diff_stations = None
-        t_abs = first_data['t_abs']
-        mask = first_data['mask']
-        sample_rate_env = first_data['sample_rate']
-        origin_env = first_data.get('origin')
 
         stack_by_comp, t_abs, mask = render_and_collect_three_component_stacks(
             all_component_data=all_component_data,
