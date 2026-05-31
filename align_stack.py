@@ -1661,6 +1661,15 @@ def prepare_reference_and_phase_timing(
     )
 
 
+def get_trace_count_or_skip(st_comp: Stream, plot_comp: str):
+    """Return trace count for selected component, or None if no traces available."""
+    num_traces = len(st_comp)
+    print(f"    {num_traces} traces on {plot_comp}")
+    if num_traces == 0:
+        return None
+    return num_traces
+
+
 def store_three_component_data(
     all_component_data: dict,
     channel: str,
@@ -1989,9 +1998,8 @@ def run_pipeline() -> None:
                 t_ref,
             ) = ref_phase_timing
     
-            num_traces = len(st_comp)
-            print(f"    {num_traces} traces on {plot_comp}")
-            if num_traces == 0:
+            num_traces = get_trace_count_or_skip(st_comp, plot_comp)
+            if num_traces is None:
                 continue
     
             # ---- Preprocess traces (detrend/taper/filter) ----
