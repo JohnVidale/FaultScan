@@ -17,12 +17,15 @@ from align_utils import (
     add_catalog_event_lines,
     add_stage_timing,
     add_utc_time_axis,
+    build_component_output_payload,
     compute_lag,
     correlation_time_bounds,
     draw_correlation_markers,
     ensure_utc_datetime,
     get_component_selection,
+    make_event_output_dir,
     report_timing_once,
+    resolve_component_key,
     set_figure_title,
     shift_left_zeropad,
     TimingState,
@@ -253,85 +256,6 @@ def plot_record_section_and_stack(
     return fig
 
 
-def resolve_component_key(channel: str, sel_comp: str) -> str:
-    """Resolve storage key used in three-component aggregate output."""
-    if channel == "DPZ":
-        return "DPZ"
-    if sel_comp == "R":
-        return "R"
-    if sel_comp == "T":
-        return "T"
-    return channel
-
-
-def build_component_output_payload(
-    record_fig,
-    selected_rows: list,
-    rejected_rows: list,
-    stack_vec: np.ndarray,
-    t_abs: np.ndarray,
-    mask: np.ndarray,
-    sample_rate: float,
-    win_start: int,
-    win_end: int,
-    move_limit_sec_value: float,
-    move_limit_samples: int,
-    npts: int,
-    start_t: float,
-    end_t: float,
-    eve_id: str,
-    align_phase_name: str,
-    origin,
-    station_shifts: dict,
-    station_corr: dict,
-    calc_shifts: dict,
-    n_pass_window: int,
-    pass_window_ids: set,
-    snippet_by_station: dict,
-    ref_window: np.ndarray,
-    p_traveltime,
-    s_traveltime,
-    name2ll: dict,
-    selected_ids: set,
-    aligned_traces_by_station: dict,
-    t_ref,
-):
-    """Create deep-copied component payload used by three-component plotting."""
-    payload = {
-        "fig": record_fig,
-        "all_rows": [(r[0], r[1], r[2].copy()) for r in (selected_rows + rejected_rows)],
-        "stack_vec": stack_vec.copy(),
-        "t_abs": t_abs.copy(),
-        "mask": mask.copy(),
-        "sample_rate": sample_rate,
-        "win_start": win_start,
-        "win_end": win_end,
-        "move_limit_sec": move_limit_sec_value,
-        "move_limit_samples": move_limit_samples,
-        "npts": npts,
-        "start_time": start_t,
-        "end_time": end_t,
-        "eve_id": eve_id,
-        "align_phase": align_phase_name,
-        "origin": origin,
-        "station_shifts": station_shifts.copy(),
-        "station_corr": station_corr.copy(),
-        "calc_shifts": calc_shifts.copy(),
-        "n_pass_window": int(n_pass_window),
-        "pass_window_ids": sorted(list(pass_window_ids), key=lambda s: int(s)),
-        "snippet_by_station": {k: v.copy() for k, v in snippet_by_station.items()},
-        "ref_window": ref_window.copy(),
-        "p_traveltime": None if p_traveltime is None else float(p_traveltime),
-        "s_traveltime": None if s_traveltime is None else float(s_traveltime),
-        "station_ll": {k: (float(v[0]), float(v[1])) for k, v in name2ll.items()},
-        # Stations that passed Stage-2 screening for this component
-        "selected_ids": sorted(list(selected_ids), key=lambda s: int(s)),
-        "aligned_traces_by_station": {k: v.copy() for k, v in aligned_traces_by_station.items()},
-        "t_ref": t_ref,
-    }
-    return payload
-
-
 def load_event_metadata(eve_id: str, info_dir: Path):
     """Load event row and return key metadata for one event id."""
     eve_info = pd.read_csv(info_dir / "catalog_20220930_8events.csv")
@@ -341,14 +265,6 @@ def load_event_metadata(eve_id: str, info_dir: Path):
     eve_lon = float(row["longitude"])
     origin = UTCDateTime(str(row["origin_time"]))
     return event_depth, eve_lat, eve_lon, origin
-
-
-def make_event_output_dir(base_prefix: str, eve_id: str) -> Path:
-    """Create and return output directory for one event."""
-    save_path = Path(base_prefix + "output")
-    save_dir = save_path / eve_id
-    save_dir.mkdir(parents=True, exist_ok=True)
-    return save_dir
 
 
 def load_station_lookup(info_dir: Path):
