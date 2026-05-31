@@ -1369,6 +1369,85 @@ def get_three_component_plot_context(all_component_data: dict):
     )
 
 
+def plot_three_component_summary_products(
+    all_component_data: dict,
+    comp_order: list,
+    stack_by_comp: dict,
+    sample_rate_env: float,
+    t_abs,
+    mask,
+    start_time: float,
+    end_time: float,
+    eve_id: str,
+    align_phase_name: str,
+    save_dir: Path,
+    origin_env,
+    catalog_df,
+    pass_window_ids: set,
+) -> None:
+    """Generate and save all downstream three-component product plots."""
+    plot_three_component_log_envelope(
+        comp_order=comp_order,
+        stack_by_comp=stack_by_comp,
+        sample_rate_env=sample_rate_env,
+        t_abs=t_abs,
+        mask=mask,
+        start_time=start_time,
+        end_time=end_time,
+        eve_id=eve_id,
+        align_phase_name=align_phase_name,
+        save_dir=save_dir,
+        origin_env=origin_env,
+        catalog_df=catalog_df,
+    )
+
+    plot_three_component_stack_compare(
+        all_component_data=all_component_data,
+        eve_id=eve_id,
+        align_phase_name=align_phase_name,
+        save_dir=save_dir,
+    )
+
+    plot_individual_seismograms_three_components(
+        show_individual_seismograms=show_individual_seismograms,
+        all_component_data=all_component_data,
+        pass_window_ids=pass_window_ids,
+        start_time=start_time,
+        eve_id=eve_id,
+        align_phase_name=align_phase_name,
+        save_dir=save_dir,
+    )
+
+    plot_three_component_station_pass_map(
+        all_component_data=all_component_data,
+        eve_id=eve_id,
+        align_phase_name=align_phase_name,
+        save_dir=save_dir,
+    )
+
+    plot_three_component_shift_comparison(
+        all_component_data=all_component_data,
+        eve_id=eve_id,
+        align_phase_name=align_phase_name,
+        start_time=start_time,
+        end_time=end_time,
+        win_pre=win_pre,
+        win_post=win_post,
+        move_limit_sec=move_limit_sec,
+        min_freq=min_freq,
+        max_freq=max_freq,
+        save_dir=save_dir,
+    )
+
+    plot_three_component_estimated_vs_calculated_shifts(
+        all_component_data=all_component_data,
+        eve_id=eve_id,
+        align_phase_name=align_phase_name,
+        move_limit_sec=move_limit_sec,
+        save_dir=save_dir,
+    )
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1866,8 +1945,9 @@ def run_pipeline() -> None:
                 save_dir=save_dir,
             )
     
-        # ===================== Log10 envelope of 3-component stack =====================
-        plot_three_component_log_envelope(
+        # No R–T zero-diff station list saved.
+        plot_three_component_summary_products(
+            all_component_data=all_component_data,
             comp_order=comp_order,
             stack_by_comp=stack_by_comp,
             sample_rate_env=sample_rate_env,
@@ -1880,58 +1960,7 @@ def run_pipeline() -> None:
             save_dir=save_dir,
             origin_env=origin_env,
             catalog_df=catalog_local,
-        )
-    
-        # No R–T zero-diff station list saved.
-        # ===================== Stack compare plot: all aligned vs r_min-selected =====================
-        plot_three_component_stack_compare(
-            all_component_data=all_component_data,
-            eve_id=eve_id,
-            align_phase_name=align_phase,
-            save_dir=save_dir,
-        )
-    
-        # ===================== Individual seismograms (20 traces per subplot, 5 panels per figure, 3 components) =====================
-        plot_individual_seismograms_three_components(
-            show_individual_seismograms=show_individual_seismograms,
-            all_component_data=all_component_data,
             pass_window_ids=pass_window_ids,
-            start_time=start_time,
-            eve_id=eve_id,
-            align_phase_name=align_phase,
-            save_dir=save_dir,
-        )
-    
-        # ===================== Station maps: pass r_win (3 components) =====================
-        plot_three_component_station_pass_map(
-            all_component_data=all_component_data,
-            eve_id=eve_id,
-            align_phase_name=align_phase,
-            save_dir=save_dir,
-        )
-    
-        # ===================== Shift comparison plot: Radial vs Transverse =====================
-        plot_three_component_shift_comparison(
-            all_component_data=all_component_data,
-            eve_id=eve_id,
-            align_phase_name=align_phase,
-            start_time=start_time,
-            end_time=end_time,
-            win_pre=win_pre,
-            win_post=win_post,
-            move_limit_sec=move_limit_sec,
-            min_freq=min_freq,
-            max_freq=max_freq,
-            save_dir=save_dir,
-        )
-    
-        # ===================== Estimated vs calculated shift plot (3 components) =====================
-        plot_three_component_estimated_vs_calculated_shifts(
-            all_component_data=all_component_data,
-            eve_id=eve_id,
-            align_phase_name=align_phase,
-            move_limit_sec=move_limit_sec,
-            save_dir=save_dir,
         )
     
         add_stage_timing(timing_state, "plot_three_component", _plot3_wall_start, _plot3_cpu_start)
