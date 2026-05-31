@@ -1558,6 +1558,33 @@ def finalize_single_component_plotting(plot_wall_start: float, plot_cpu_start: f
     plt.show()
 
 
+def unpack_alignment_products(alignment: dict):
+    """Return run_pipeline alignment outputs as a stable ordered tuple."""
+    return (
+        alignment["npts"],
+        alignment["sample_rate"],
+        alignment["move_limit_samples"],
+        alignment["win_start"],
+        alignment["win_end"],
+        alignment["calc_shifts"],
+        alignment["aligned_stack"],
+        alignment["selected_aligned_stack"],
+        alignment["selected_ids"],
+        alignment["station_corr"],
+        alignment["n_pass_window"],
+        alignment["pass_window_ids"],
+        alignment["snippet_by_station"],
+        alignment["ref_window"],
+        alignment["selected_rows"],
+        alignment["rejected_rows"],
+        alignment["station_shifts"],
+        alignment["aligned_traces_by_station"],
+        alignment["t_abs"],
+        alignment["mask"],
+        alignment["stack_vec"],
+    )
+
+
 def store_three_component_data(
     all_component_data: dict,
     channel: str,
@@ -1912,27 +1939,29 @@ def run_pipeline() -> None:
                 align_phase_name=align_phase,
                 t_ref=t_ref,
             )
-            npts = alignment["npts"]
-            sample_rate = alignment["sample_rate"]
-            move_limit_samples = alignment["move_limit_samples"]
-            win_start = alignment["win_start"]
-            win_end = alignment["win_end"]
-            calc_shifts = alignment["calc_shifts"]
-            aligned_stack = alignment["aligned_stack"]
-            selected_aligned_stack = alignment["selected_aligned_stack"]
-            selected_ids = alignment["selected_ids"]
-            station_corr = alignment["station_corr"]
-            n_pass_window = alignment["n_pass_window"]
-            pass_window_ids = alignment["pass_window_ids"]
-            snippet_by_station = alignment["snippet_by_station"]
-            ref_window = alignment["ref_window"]
-            selected_rows = alignment["selected_rows"]
-            rejected_rows = alignment["rejected_rows"]
-            station_shifts = alignment["station_shifts"]
-            aligned_traces_by_station = alignment["aligned_traces_by_station"]
-            t_abs = alignment["t_abs"]
-            mask = alignment["mask"]
-            stack_vec = alignment["stack_vec"]
+            (
+                npts,
+                sample_rate,
+                move_limit_samples,
+                win_start,
+                win_end,
+                calc_shifts,
+                aligned_stack,
+                selected_aligned_stack,
+                selected_ids,
+                station_corr,
+                n_pass_window,
+                pass_window_ids,
+                snippet_by_station,
+                ref_window,
+                selected_rows,
+                rejected_rows,
+                station_shifts,
+                aligned_traces_by_station,
+                t_abs,
+                mask,
+                stack_vec,
+            ) = unpack_alignment_products(alignment)
     
             # ---- Plot: superposition of Stage1/Stage2/Final stacks ----
             _plot_wall_start = time.perf_counter()
