@@ -9,7 +9,6 @@ import time
 from obspy import UTCDateTime, Stream, Trace
 from obspy.geodetics import gps2dist_azimuth
 from obspy.taup import TauPyModel
-from obspy.signal.rotate import rotate_ne_rt
 from scipy.signal import hilbert
 from scipy.signal.windows import gaussian
 
@@ -36,6 +35,7 @@ from align_utils import (
     normalize_traces_in_window,
     report_timing_once,
     read_waveforms_for_event,
+    rotate_horizontals_to_component,
     resolve_component_key,
     select_reference_trace,
     print_reference_summary,
@@ -463,48 +463,14 @@ def run_pipeline() -> None:
             # ---- Rotate horizontal components to R/T ----
             if sel_comp in ("R", "T"):
                 print("Rotating horizontal components (N/E) to R/T ...")
-    
-                # In this dataset: DP1 is treated as N-like; DP2 is treated as E-like
-                stN = st_window.select(channel="DP1")
-                stE = st_window.select(channel="DP2")
-                rotated_traces = []
-    
-                _rotate_wall_start = time.perf_counter()
-                _rotate_cpu_start = time.process_time()
-                for trN in stN:
-                    sid = str(trN.stats.station)
-                    stE_match = stE.select(station=sid)
-                    if len(stE_match) == 0:
-                        continue
-                    trE = stE_match[0]
-    
-                    # Back-azimuth (station -> event), plus instrument orientation correction (11°)
-                    slat, slon = name2ll[sid]
-                    _, _, baz_geo = gps2dist_azimuth(eve_lat, eve_lon, slat, slon)
-                    baz = baz_geo - 11.0
-    
-                    # Synchronize length and rotate
-                    npts_rot = min(trN.stats.npts, trE.stats.npts)
-                    n = trN.data[:npts_rot]
-                    e = trE.data[:npts_rot]
-                    r, t = rotate_ne_rt(n, e, baz)
-    
-                    if sel_comp == "R":
-                        trR = trN.copy()
-                        trR.data = r
-                        trR.stats.channel = trN.stats.channel[:-1] + "R"
-                        rotated_traces.append(trR)
-                        plot_comp = "R"
-                    elif sel_comp == "T":
-                        trT = trN.copy()
-                        trT.data = t
-                        trT.stats.channel = trN.stats.channel[:-1] + "T"
-                        rotated_traces.append(trT)
-                        plot_comp = "T"
-    
-                add_stage_timing(timing_state, "rotate_to_rt", _rotate_wall_start, _rotate_cpu_start)
-    
-                st_comp = Stream(traces=rotated_traces)
+                st_comp, plot_comp = rotate_horizontals_to_component(
+                    st_window=st_window,
+                    sel_comp=sel_comp,
+                    name2ll=name2ll,
+                    eve_lat=eve_lat,
+                    eve_lon=eve_lon,
+                    timing_state=timing_state,
+                )
             else:
                 st_comp = st_window.select(channel=channel)
     

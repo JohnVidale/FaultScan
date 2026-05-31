@@ -11,6 +11,7 @@ from obspy import read, Stream
 from obspy.geodetics import gps2dist_azimuth
 from obspy.geodetics import degrees2kilometers, locations2degrees
 from obspy import UTCDateTime
+from obspy.signal.rotate import rotate_ne_rt
 
 
 @dataclass
@@ -334,6 +335,55 @@ def read_waveforms_for_event(
         horizontal_raw_limits_cache[eve_id] = raw_limits_by_station.copy()
 
     return st_window, raw_limits_by_station
+
+
+def rotate_horizontals_to_component(
+    st_window,
+    sel_comp: str,
+    name2ll: dict,
+    eve_lat: float,
+    eve_lon: float,
+    timing_state: TimingState,
+):
+    """Rotate DP1/DP2 traces to selected R or T component and return stream + label."""
+    st_n = st_window.select(channel="DP1")
+    st_e = st_window.select(channel="DP2")
+    rotated_traces = []
+    plot_comp = sel_comp
+
+    _rotate_wall_start = time.perf_counter()
+    _rotate_cpu_start = time.process_time()
+    for tr_n in st_n:
+        sid = str(tr_n.stats.station)
+        st_e_match = st_e.select(station=sid)
+        if len(st_e_match) == 0:
+            continue
+        tr_e = st_e_match[0]
+
+        slat, slon = name2ll[sid]
+        _, _, baz_geo = gps2dist_azimuth(eve_lat, eve_lon, slat, slon)
+        baz = baz_geo - 11.0
+
+        npts_rot = min(tr_n.stats.npts, tr_e.stats.npts)
+        n = tr_n.data[:npts_rot]
+        e = tr_e.data[:npts_rot]
+        r, t = rotate_ne_rt(n, e, baz)
+
+        if sel_comp == "R":
+            tr_r = tr_n.copy()
+            tr_r.data = r
+            tr_r.stats.channel = tr_n.stats.channel[:-1] + "R"
+            rotated_traces.append(tr_r)
+            plot_comp = "R"
+        elif sel_comp == "T":
+            tr_t = tr_n.copy()
+            tr_t.data = t
+            tr_t.stats.channel = tr_n.stats.channel[:-1] + "T"
+            rotated_traces.append(tr_t)
+            plot_comp = "T"
+
+    add_stage_timing(timing_state, "rotate_to_rt", _rotate_wall_start, _rotate_cpu_start)
+    return Stream(traces=rotated_traces), plot_comp
 
 
 def select_reference_trace(st_comp, name2ll: dict):
