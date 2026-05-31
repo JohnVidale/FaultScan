@@ -6,8 +6,8 @@ from pathlib import Path
 from datetime import timezone
 import time
 
-from obspy import read, UTCDateTime, Stream, Trace
-from obspy.geodetics import degrees2kilometers, locations2degrees, gps2dist_azimuth
+from obspy import UTCDateTime, Stream, Trace
+from obspy.geodetics import gps2dist_azimuth
 from obspy.taup import TauPyModel
 from obspy.signal.rotate import rotate_ne_rt
 from scipy.signal import hilbert
@@ -28,6 +28,7 @@ from align_utils import (
     load_station_lookup,
     make_event_output_dir,
     report_timing_once,
+    read_waveforms_for_event,
     resolve_component_key,
     select_reference_trace,
     print_reference_summary,
@@ -259,123 +260,6 @@ def plot_record_section_and_stack(
     fig.savefig(record_file, dpi=300, bbox_inches="tight")
     print(f"✓ Record-section plot saved to: {record_file}")
     return fig
-
-
-def read_waveforms_for_event(
-    eve_id: str,
-    channel: str,
-    process_as_three_comp_mode: bool,
-    horizontal_window_cache: dict,
-    horizontal_raw_limits_cache: dict,
-    name2ll: dict,
-    eve_lat: float,
-    eve_lon: float,
-    origin,
-):
-    """Read (or reuse) windowed traces for an event/channel and return stream + raw limits."""
-    use_horizontal_cache = (
-        process_as_three_comp_mode
-        and channel == "DP2"
-        and eve_id in horizontal_window_cache
-    )
-
-    if use_horizontal_cache:
-        st_window = horizontal_window_cache[eve_id].copy()
-        raw_limits_by_station = horizontal_raw_limits_cache.get(eve_id, {}).copy()
-        print("Reusing horizontal read cache for transverse component.")
-        return st_window, raw_limits_by_station
-
-    st_all = Stream()
-    stanum = 0
-    raw_limits_by_station = {}
-
-    _read_wall_start = time.perf_counter()
-    _read_cpu_start = time.process_time()
-    for sta, (slat, slon) in name2ll.items():
-        code_num = int(sta)
-        code_str = f"{code_num:05d}"
-
-        # If requested channel is horizontal, read both DP1 and DP2 (needed for rotation).
-        if channel in ["DP1", "DP2"]:
-            chan_list_this_sta = ["DP1", "DP2"]
-        else:
-            chan_list_this_sta = [channel]
-
-        # Epicentral distance
-        dist_deg = locations2degrees(eve_lat, eve_lon, slat, slon)
-        dist_km = degrees2kilometers(dist_deg)
-
-        first_chan_for_sta = True
-
-        for ch_read in chan_list_this_sta:
-            fpath = (
-                data_path
-                / code_str
-                / f"{ch_read}.D"
-                / f"7V.{code_str}.00.{ch_read}.D.2022.273.{sps_rate}.mseed"
-            )
-            if verbose:
-                if stanum % 20 == 0:
-                    print(f"Reading station {sta} channel {ch_read} from {fpath}")
-            if not fpath.exists():
-                if verbose:
-                    print("No such file")
-                continue
-
-            # Read only the requested time window to reduce I/O.
-            st_win = read(
-                str(fpath),
-                starttime=origin + start_time,
-                endtime=origin + end_time,
-            )
-            if len(st_win) == 0:
-                continue
-            tr = st_win[0]
-            if sta not in raw_limits_by_station:
-                raw_limits_by_station[sta] = (tr.stats.starttime, tr.stats.endtime)
-
-            # Store metadata for later plotting/selection
-            tr.stats.dist_km = dist_km
-            tr.stats.dist_deg = dist_deg
-            tr.stats.relatime = tr.times(reftime=origin)
-            tr.stats.station = sta
-            st_all.append(tr)
-
-            # Count stations (once per station)
-            if first_chan_for_sta:
-                stanum += 1
-                if stanum % 100 == 0:
-                    print(f"Event {eve_id}: processed {stanum} stations...")
-                first_chan_for_sta = False
-    add_stage_timing(timing_state, "waveform_read_slice", _read_wall_start, _read_cpu_start)
-
-    # ---- Sort by distance ----
-    st_all.sort(keys=["dist_km"])
-    if not st_all:
-        print(f"No traces found for event {eve_id}, skip.")
-        return None, None
-
-    # ---- Keep traces that cover [origin + start_time, origin + end_time] ----
-    st_window = Stream()
-    kept = 0
-    for tr in st_all:
-        # Keep the entire [start_time, end_time] record as long as it covers the plot window
-        if tr.stats.endtime >= origin + start_time and tr.stats.starttime <= origin + end_time:
-            tr_i = tr.copy()
-            if tr_i is not None and tr_i.stats.npts > 0:
-                tr_i.stats.station = tr.stats.station
-                st_window.append(tr_i)
-                kept += 1
-
-    if kept == 0:
-        print("  No data in plot window (start_time to end_time).")
-        return None, None
-
-    if process_as_three_comp_mode and channel == "DP1":
-        horizontal_window_cache[eve_id] = st_window.copy()
-        horizontal_raw_limits_cache[eve_id] = raw_limits_by_station.copy()
-
-    return st_window, raw_limits_by_station
 
 
 def compute_alignment_products(
@@ -670,6 +554,12 @@ def run_pipeline() -> None:
                 eve_lat=eve_lat,
                 eve_lon=eve_lon,
                 origin=origin,
+                data_path=data_path,
+                sps_rate=sps_rate,
+                start_time=start_time,
+                end_time=end_time,
+                verbose=verbose,
+                timing_state=timing_state,
             )
             if st_window is None:
                 continue

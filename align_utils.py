@@ -7,7 +7,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from obspy import read, Stream
 from obspy.geodetics import gps2dist_azimuth
+from obspy.geodetics import degrees2kilometers, locations2degrees
 from obspy import UTCDateTime
 
 
@@ -168,6 +170,121 @@ def load_station_lookup(info_dir: Path):
     sta_lat = sta_info["lat"]
     sta_lon = sta_info["lon"]
     return {sta_name[i]: (sta_lat[i], sta_lon[i]) for i in range(len(sta_name))}
+
+
+def read_waveforms_for_event(
+    eve_id: str,
+    channel: str,
+    process_as_three_comp_mode: bool,
+    horizontal_window_cache: dict,
+    horizontal_raw_limits_cache: dict,
+    name2ll: dict,
+    eve_lat: float,
+    eve_lon: float,
+    origin,
+    data_path: Path,
+    sps_rate: str,
+    start_time: float,
+    end_time: float,
+    verbose: bool,
+    timing_state: TimingState,
+):
+    """Read (or reuse) windowed traces for an event/channel and return stream + raw limits."""
+    use_horizontal_cache = (
+        process_as_three_comp_mode
+        and channel == "DP2"
+        and eve_id in horizontal_window_cache
+    )
+
+    if use_horizontal_cache:
+        st_window = horizontal_window_cache[eve_id].copy()
+        raw_limits_by_station = horizontal_raw_limits_cache.get(eve_id, {}).copy()
+        print("Reusing horizontal read cache for transverse component.")
+        return st_window, raw_limits_by_station
+
+    st_all = Stream()
+    stanum = 0
+    raw_limits_by_station = {}
+
+    _read_wall_start = time.perf_counter()
+    _read_cpu_start = time.process_time()
+    for sta, (slat, slon) in name2ll.items():
+        code_num = int(sta)
+        code_str = f"{code_num:05d}"
+
+        if channel in ["DP1", "DP2"]:
+            chan_list_this_sta = ["DP1", "DP2"]
+        else:
+            chan_list_this_sta = [channel]
+
+        dist_deg = locations2degrees(eve_lat, eve_lon, slat, slon)
+        dist_km = degrees2kilometers(dist_deg)
+
+        first_chan_for_sta = True
+
+        for ch_read in chan_list_this_sta:
+            fpath = (
+                data_path
+                / code_str
+                / f"{ch_read}.D"
+                / f"7V.{code_str}.00.{ch_read}.D.2022.273.{sps_rate}.mseed"
+            )
+            if verbose:
+                if stanum % 20 == 0:
+                    print(f"Reading station {sta} channel {ch_read} from {fpath}")
+            if not fpath.exists():
+                if verbose:
+                    print("No such file")
+                continue
+
+            st_win = read(
+                str(fpath),
+                starttime=origin + start_time,
+                endtime=origin + end_time,
+            )
+            if len(st_win) == 0:
+                continue
+            tr = st_win[0]
+            if sta not in raw_limits_by_station:
+                raw_limits_by_station[sta] = (tr.stats.starttime, tr.stats.endtime)
+
+            tr.stats.dist_km = dist_km
+            tr.stats.dist_deg = dist_deg
+            tr.stats.relatime = tr.times(reftime=origin)
+            tr.stats.station = sta
+            st_all.append(tr)
+
+            if first_chan_for_sta:
+                stanum += 1
+                if stanum % 100 == 0:
+                    print(f"Event {eve_id}: processed {stanum} stations...")
+                first_chan_for_sta = False
+    add_stage_timing(timing_state, "waveform_read_slice", _read_wall_start, _read_cpu_start)
+
+    st_all.sort(keys=["dist_km"])
+    if not st_all:
+        print(f"No traces found for event {eve_id}, skip.")
+        return None, None
+
+    st_window = Stream()
+    kept = 0
+    for tr in st_all:
+        if tr.stats.endtime >= origin + start_time and tr.stats.starttime <= origin + end_time:
+            tr_i = tr.copy()
+            if tr_i is not None and tr_i.stats.npts > 0:
+                tr_i.stats.station = tr.stats.station
+                st_window.append(tr_i)
+                kept += 1
+
+    if kept == 0:
+        print("  No data in plot window (start_time to end_time).")
+        return None, None
+
+    if process_as_three_comp_mode and channel == "DP1":
+        horizontal_window_cache[eve_id] = st_window.copy()
+        horizontal_raw_limits_cache[eve_id] = raw_limits_by_station.copy()
+
+    return st_window, raw_limits_by_station
 
 
 def select_reference_trace(st_comp, name2ll: dict):
