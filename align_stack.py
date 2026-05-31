@@ -1273,6 +1273,31 @@ def render_three_component_panel(
         print(f"[WARN] Failed to draw correlation window bounds (bottom {comp_name}): {e}")
 
 
+def setup_three_component_record_figure(show_record: bool, eve_id: str, align_phase_name: str):
+    """Create combined 3-component record-section figure and grid spec when enabled."""
+    if not show_record:
+        return None, None
+
+    fig_local = plt.figure(figsize=(18, 9))
+    set_figure_title(fig_local, f"{eve_id} {align_phase_name} 3-comp record section")
+    gs_local = fig_local.add_gridspec(2, 3, height_ratios=[3, 1], hspace=0.3, wspace=0.25)
+    return fig_local, gs_local
+
+
+def finalize_three_component_record_figure(fig, eve_id: str, align_phase_name: str, save_dir: Path) -> None:
+    """Apply title and save the combined 3-component record-section figure."""
+    fig.suptitle(
+        f"Event {eve_id} - Aligned {align_phase_name} waveforms (3 components)",
+        fontsize=14,
+        fontweight="bold",
+    )
+    save_file = save_dir / f"{eve_id}_3comp_{align_phase_name}.png"
+    fig.savefig(save_file, dpi=300, bbox_inches="tight")
+    print(f"\n✓ Three-component plot saved to: {save_file}")
+    print("\n✓ Three-component plot created successfully!\n")
+    # plt.show()  # defer until end
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1714,12 +1739,11 @@ def run_pipeline() -> None:
         print(f"Creating combined three-component plot...")
         print(f"{'='*70}\\n")
     
-        fig = None
-        gs = None
-        if show_record_section_plot:
-            fig = plt.figure(figsize=(18, 9))
-            set_figure_title(fig, f"{eve_id} {align_phase} 3-comp record section")
-            gs = fig.add_gridspec(2, 3, height_ratios=[3, 1], hspace=0.3, wspace=0.25)
+        fig, gs = setup_three_component_record_figure(
+            show_record=show_record_section_plot,
+            eve_id=eve_id,
+            align_phase_name=align_phase,
+        )
         
         comp_order = ['DPZ', 'R', 'T']
         comp_titles = ['Vertical (Z)', 'Radial (R)', 'Transverse (T)']
@@ -1776,16 +1800,13 @@ def run_pipeline() -> None:
             )
     
         if show_record_section_plot:
-            fig.suptitle(f'Event {eve_id} - Aligned {align_phase} waveforms (3 components)',
-                        fontsize=14, fontweight='bold')
-    
-            # Save combined figure
             save_dir = make_event_output_dir(path_prefix, eve_id)
-            save_file = save_dir / f"{eve_id}_3comp_{align_phase}.png"
-            fig.savefig(save_file, dpi=300, bbox_inches='tight')
-            print(f"\n✓ Three-component plot saved to: {save_file}")
-            print(f"\n✓ Three-component plot created successfully!\n")
-            # plt.show()  # defer until end
+            finalize_three_component_record_figure(
+                fig=fig,
+                eve_id=eve_id,
+                align_phase_name=align_phase,
+                save_dir=save_dir,
+            )
     
         # ===================== Log10 envelope of 3-component stack =====================
         plot_three_component_log_envelope(
