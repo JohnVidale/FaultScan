@@ -1736,6 +1736,69 @@ def unpack_reference_phase_timing(ref_phase_timing):
     return ref_phase_timing
 
 
+def prepare_stream_reference_context(
+    st_window: Stream,
+    sel_comp: str,
+    channel: str,
+    name2ll: dict,
+    eve_lat: float,
+    eve_lon: float,
+    raw_limits_by_station,
+    event_depth: float,
+    origin,
+    align_phase_name: str,
+):
+    """Prepare component stream, reference timing context, and trace count for one event."""
+    st_comp, plot_comp = select_component_stream(
+        st_window=st_window,
+        sel_comp=sel_comp,
+        channel=channel,
+        name2ll=name2ll,
+        eve_lat=eve_lat,
+        eve_lon=eve_lon,
+    )
+
+    ref_phase_timing = prepare_reference_and_phase_timing(
+        st_comp=st_comp,
+        name2ll=name2ll,
+        raw_limits_by_station=raw_limits_by_station,
+        event_depth=event_depth,
+        origin=origin,
+        align_phase_name=align_phase_name,
+    )
+    if ref_phase_timing is None:
+        return None
+
+    (
+        ref_station_id,
+        ref_trace,
+        p_traveltime,
+        s_traveltime,
+        p_arrival_time,
+        s_arrival_time,
+        phase_traveltime,
+        t_ref,
+    ) = unpack_reference_phase_timing(ref_phase_timing)
+
+    num_traces = get_trace_count_or_skip(st_comp, plot_comp)
+    if num_traces is None:
+        return None
+
+    return (
+        st_comp,
+        plot_comp,
+        ref_station_id,
+        ref_trace,
+        p_traveltime,
+        s_traveltime,
+        p_arrival_time,
+        s_arrival_time,
+        phase_traveltime,
+        t_ref,
+        num_traces,
+    )
+
+
 def run_alignment_and_unpack(
     st_comp: Stream,
     ref_trace: Trace,
@@ -2089,27 +2152,23 @@ def run_pipeline() -> None:
                 raw_limits_by_station,
             ) = unpack_event_context(event_context)
     
-            st_comp, plot_comp = select_component_stream(
+            stream_ref_context = prepare_stream_reference_context(
                 st_window=st_window,
                 sel_comp=sel_comp,
                 channel=channel,
                 name2ll=name2ll,
                 eve_lat=eve_lat,
                 eve_lon=eve_lon,
-            )
-    
-            # ---- Auto-select reference station and phase timing ----
-            ref_phase_timing = prepare_reference_and_phase_timing(
-                st_comp=st_comp,
-                name2ll=name2ll,
                 raw_limits_by_station=raw_limits_by_station,
                 event_depth=event_depth,
                 origin=origin,
                 align_phase_name=align_phase,
             )
-            if ref_phase_timing is None:
+            if stream_ref_context is None:
                 continue
             (
+                st_comp,
+                plot_comp,
                 ref_station_id,
                 ref_trace,
                 p_traveltime,
@@ -2118,11 +2177,8 @@ def run_pipeline() -> None:
                 s_arrival_time,
                 phase_traveltime,
                 t_ref,
-            ) = unpack_reference_phase_timing(ref_phase_timing)
-    
-            num_traces = get_trace_count_or_skip(st_comp, plot_comp)
-            if num_traces is None:
-                continue
+                num_traces,
+            ) = stream_ref_context
     
             # ---- Preprocess traces (detrend/taper/filter) ----
             preprocess_traces_bandpass(
