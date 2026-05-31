@@ -2277,9 +2277,7 @@ def run_pipeline() -> None:
                 ref_trace,
                 p_traveltime,
                 s_traveltime,
-                p_arrival_time,
-                s_arrival_time,
-                phase_traveltime,
+                _, _, _,
                 t_ref,
                 num_traces,
             ) = stream_ref_context
