@@ -45,6 +45,57 @@ class AlignStackSmokeTests(unittest.TestCase):
             )
         self.assertIsNone(out)
 
+    def test_prepare_stream_reference_context_returns_none_when_no_traces(self):
+        fake_stream = []
+        ref_phase_timing = ("STA", object(), 1.0, 2.0, None, None, 1.5, 1.5)
+        with patch.object(self.mod, "select_component_stream", return_value=(fake_stream, "Z")), patch.object(
+            self.mod,
+            "prepare_reference_and_phase_timing",
+            return_value=ref_phase_timing,
+        ):
+            out = self.mod.prepare_stream_reference_context(
+                st_window=object(),
+                sel_comp="Z",
+                channel="DPZ",
+                name2ll={"STA": (0.0, 0.0)},
+                eve_lat=0.0,
+                eve_lon=0.0,
+                raw_limits_by_station={},
+                event_depth=10.0,
+                origin=None,
+                align_phase_name="S",
+            )
+        self.assertIsNone(out)
+
+    def test_prepare_stream_reference_context_success_shape(self):
+        fake_stream = [object(), object()]
+        fake_ref = object()
+        ref_phase_timing = ("STA", fake_ref, 1.0, 2.0, None, None, 1.5, 1.5)
+        with patch.object(self.mod, "select_component_stream", return_value=(fake_stream, "Z")), patch.object(
+            self.mod,
+            "prepare_reference_and_phase_timing",
+            return_value=ref_phase_timing,
+        ):
+            out = self.mod.prepare_stream_reference_context(
+                st_window=object(),
+                sel_comp="Z",
+                channel="DPZ",
+                name2ll={"STA": (0.0, 0.0)},
+                eve_lat=0.0,
+                eve_lon=0.0,
+                raw_limits_by_station={},
+                event_depth=10.0,
+                origin=None,
+                align_phase_name="S",
+            )
+
+        self.assertIsNotNone(out)
+        self.assertEqual(len(out), 11)
+        self.assertEqual(out[0], fake_stream)
+        self.assertEqual(out[1], "Z")
+        self.assertEqual(out[2], "STA")
+        self.assertEqual(out[3], fake_ref)
+
 
 if __name__ == "__main__":
     unittest.main()
