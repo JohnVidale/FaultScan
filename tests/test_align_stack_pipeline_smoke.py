@@ -110,6 +110,65 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
         mock_finalize.assert_called_once()
         mock_store.assert_not_called()
 
+    def test_run_pipeline_skips_when_event_context_missing(self):
+        with patch.object(self.mod, "events", ["E1"]), patch.object(self.mod, "all_channels", False), patch.object(
+            self.mod,
+            "get_component_selection",
+            return_value=("DPZ".split(), False, "Z".split()),
+        ), patch.object(
+            self.mod,
+            "load_event_context_and_waveforms",
+            return_value=None,
+        ) as mock_load, patch.object(
+            self.mod,
+            "prepare_stream_reference_context",
+            return_value=None,
+        ) as mock_prepare, patch.object(
+            self.mod,
+            "preprocess_traces_bandpass",
+            return_value=None,
+        ) as mock_preprocess:
+            self.mod.run_pipeline()
+
+        mock_load.assert_called_once()
+        mock_prepare.assert_not_called()
+        mock_preprocess.assert_not_called()
+
+    def test_run_pipeline_skips_when_stream_reference_context_missing(self):
+        event_context = (
+            10.0,
+            35.0,
+            -117.0,
+            None,
+            "/tmp",
+            {"1": (35.0, -117.0)},
+            object(),
+            {},
+        )
+
+        with patch.object(self.mod, "events", ["E1"]), patch.object(self.mod, "all_channels", False), patch.object(
+            self.mod,
+            "get_component_selection",
+            return_value=("DPZ".split(), False, "Z".split()),
+        ), patch.object(
+            self.mod,
+            "load_event_context_and_waveforms",
+            return_value=event_context,
+        ) as mock_load, patch.object(
+            self.mod,
+            "prepare_stream_reference_context",
+            return_value=None,
+        ) as mock_prepare, patch.object(
+            self.mod,
+            "preprocess_traces_bandpass",
+            return_value=None,
+        ) as mock_preprocess:
+            self.mod.run_pipeline()
+
+        mock_load.assert_called_once()
+        mock_prepare.assert_called_once()
+        mock_preprocess.assert_not_called()
+
     def test_run_pipeline_three_component_combined_branch(self):
         event_context = (
             10.0,
