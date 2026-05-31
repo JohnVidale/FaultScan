@@ -647,6 +647,99 @@ def plot_individual_seismograms_single_component(
         print(f"[WARN] Failed to create individual seismograms plot: {e}")
 
 
+def plot_three_component_stack_compare(
+    all_component_data: dict,
+    eve_id: str,
+    align_phase_name: str,
+    save_dir: Path,
+) -> None:
+    """Plot black/red stack comparison for Z/R/T components and save figure."""
+    print("Creating stack comparison plot (all aligned vs r_min-selected)...")
+
+    fig_cmp, axes_cmp = plt.subplots(3, 1, figsize=(9, 12), sharex=True, sharey=True)
+    set_figure_title(fig_cmp, f"{eve_id} stack compare")
+    comp_order = ["DPZ", "R", "T"]
+    comp_titles_cmp = ["Z stack", "R stack", "T stack"]
+    utc_tz = timezone.utc
+
+    for j, comp_name in enumerate(comp_order):
+        axc = axes_cmp[j]
+        if comp_name not in all_component_data:
+            axc.set_axis_off()
+            continue
+
+        data = all_component_data[comp_name]
+        t_abs = data["t_abs"]
+        mask = data["mask"]
+        start_time = data["start_time"]
+        end_time = data["end_time"]
+        p_time = data.get("p_traveltime")
+        s_time = data.get("s_traveltime")
+
+        tr_map = data.get("aligned_traces_by_station", {})
+        all_stations = sorted(tr_map.keys(), key=lambda s: int(s))
+
+        stack_black = np.zeros_like(t_abs)
+        if len(all_stations) > 0:
+            bank_all = [tr_map[sta] for sta in all_stations]
+            stack_black = np.mean(np.vstack(bank_all), axis=0)
+            ms = np.max(np.abs(stack_black)) or 1.0
+            stack_black = stack_black / ms
+
+        sel_ids = data.get("selected_ids", [])
+        sel_ids = [s for s in sel_ids if s in tr_map]
+        n_pass_window = int(data.get("n_pass_window", len(sel_ids)))
+        stack_red = stack_black
+        if len(sel_ids) > 0:
+            bank_sel = [tr_map[sta] for sta in sel_ids]
+            stack_red = np.mean(np.vstack(bank_sel), axis=0)
+            ms = np.max(np.abs(stack_red)) or 1.0
+            stack_red = stack_red / ms
+
+        axc.plot(t_abs[mask], stack_black[mask], color="k", lw=2, label="All aligned traces")
+        axc.plot(
+            t_abs[mask],
+            stack_red[mask],
+            color="r",
+            lw=2,
+            label=f"Pass r_win N={n_pass_window}",
+        )
+        axc.axhline(0.0, color="k", lw=0.6, alpha=0.6)
+        if p_time is not None:
+            axc.axvline(x=p_time, color="b", lw=1.5, alpha=0.7, linestyle="--", label="P arrival")
+        if s_time is not None:
+            axc.axvline(x=s_time, color="g", lw=1.5, alpha=0.7, linestyle="--", label="S arrival")
+        axc.set_xlim(start_time, end_time)
+        axc.set_ylim(-1.1, 1.1)
+        axc.grid(alpha=0.2)
+        axc.set_title(comp_titles_cmp[j], fontsize=12, fontweight="bold")
+        axc.set_xlabel("Time since origin (s)", fontsize=11)
+        if j != 2:
+            axc.set_xlabel("")
+        if j == 0:
+            axc.set_ylabel("Stack (norm.)", fontsize=11)
+        axc.legend(loc="upper right", fontsize=9)
+
+        if j == 2:
+            try:
+                origin_utc = data.get("origin")
+                if origin_utc is not None:
+                    add_utc_time_axis(axc, origin_utc, tick_tz=utc_tz)
+            except Exception as e:
+                print(f"[WARN] Failed to add UTC time axis: {e}")
+
+    fig_cmp.suptitle(
+        f"Event {eve_id} - Stack compare (black: all aligned; red: pass r_min thresholds)",
+        fontsize=13,
+        fontweight="bold",
+    )
+    plt.tight_layout()
+
+    cmp_file = save_dir / f"{eve_id}_rtfilter_stack_compare_{align_phase_name}.png"
+    fig_cmp.savefig(cmp_file, dpi=300, bbox_inches="tight")
+    print(f"✓ Stack comparison plot saved to: {cmp_file}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1278,95 +1371,12 @@ def run_pipeline() -> None:
     
         # No R–T zero-diff station list saved.
         # ===================== Stack compare plot: all aligned vs r_min-selected =====================
-        print("Creating stack comparison plot (all aligned vs r_min-selected)...")
-    
-        # Figure layout: 3 rows, 1 column (Z / R / T) — vertical arrangement
-        fig_cmp, axes_cmp = plt.subplots(3, 1, figsize=(9, 12), sharex=True, sharey=True)
-        set_figure_title(fig_cmp, f"{eve_id} stack compare")
-        comp_order = ['DPZ', 'R', 'T']
-        comp_titles_cmp = ['Z stack', 'R stack', 'T stack']
-        utc_tz = timezone.utc
-    
-        for j, comp_name in enumerate(comp_order):
-            axc = axes_cmp[j]
-            if comp_name not in all_component_data:
-                axc.set_axis_off()
-                continue
-    
-            data = all_component_data[comp_name]
-            t_abs = data['t_abs']
-            mask = data['mask']
-            start_time = data['start_time']
-            end_time = data['end_time']
-            p_time = data.get('p_traveltime')
-            s_time = data.get('s_traveltime')
-    
-            tr_map = data.get('aligned_traces_by_station', {})
-            all_stations = sorted(tr_map.keys(), key=lambda s: int(s))
-    
-            # Black: stack of all aligned traces
-            stack_black = np.zeros_like(t_abs)
-            if len(all_stations) > 0:
-                bank_all = [tr_map[sta] for sta in all_stations]
-                stack_black = np.mean(np.vstack(bank_all), axis=0)
-                ms = np.max(np.abs(stack_black)) or 1.0
-                stack_black = stack_black / ms
-    
-            # Red: stack of traces that pass r_min thresholds (selected_ids)
-            sel_ids = data.get('selected_ids', [])
-            sel_ids = [s for s in sel_ids if s in tr_map]
-            n_pass_window = int(data.get('n_pass_window', len(sel_ids)))
-            stack_red = stack_black
-            if len(sel_ids) > 0:
-                bank_sel = [tr_map[sta] for sta in sel_ids]
-                stack_red = np.mean(np.vstack(bank_sel), axis=0)
-                ms = np.max(np.abs(stack_red)) or 1.0
-                stack_red = stack_red / ms
-    
-            axc.plot(t_abs[mask], stack_black[mask], color='k', lw=2, label='All aligned traces')
-            axc.plot(
-                t_abs[mask],
-                stack_red[mask],
-                color='r',
-                lw=2,
-                label=f'Pass r_win N={n_pass_window}',
-            )
-            axc.axhline(0.0, color='k', lw=0.6, alpha=0.6)
-            if p_time is not None:
-                axc.axvline(x=p_time, color='b', lw=1.5, alpha=0.7, linestyle='--', label='P arrival')
-            if s_time is not None:
-                axc.axvline(x=s_time, color='g', lw=1.5, alpha=0.7, linestyle='--', label='S arrival')
-            axc.set_xlim(start_time, end_time)
-            axc.set_ylim(-1.1, 1.1)
-            axc.grid(alpha=0.2)
-            axc.set_title(comp_titles_cmp[j], fontsize=12, fontweight='bold')
-            axc.set_xlabel('Time since origin (s)', fontsize=11)
-            if j != 2:
-                axc.set_xlabel('')
-            if j == 0:
-                axc.set_ylabel('Stack (norm.)', fontsize=11)
-            axc.legend(loc='upper right', fontsize=9)
-    
-            if j == 2:
-                try:
-                    origin_utc = data.get('origin')
-                    if origin_utc is not None:
-                        add_utc_time_axis(axc, origin_utc, tick_tz=utc_tz)
-                except Exception as e:
-                    print(f"[WARN] Failed to add UTC time axis: {e}")
-    
-        fig_cmp.suptitle(
-            f'Event {eve_id} - Stack compare (black: all aligned; red: pass r_min thresholds)',
-            fontsize=13,
-            fontweight='bold'
+        plot_three_component_stack_compare(
+            all_component_data=all_component_data,
+            eve_id=eve_id,
+            align_phase_name=align_phase,
+            save_dir=save_dir,
         )
-        plt.tight_layout()
-    
-        # Save comparison figure
-        cmp_file = save_dir / f"{eve_id}_rtfilter_stack_compare_{align_phase}.png"
-        fig_cmp.savefig(cmp_file, dpi=300, bbox_inches='tight')
-        print(f"✓ Stack comparison plot saved to: {cmp_file}")
-        # plt.show()
     
         # ===================== Individual seismograms (20 traces per subplot, 5 panels per figure, 3 components) =====================
         if show_individual_seismograms:
