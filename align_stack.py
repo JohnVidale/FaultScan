@@ -330,6 +330,62 @@ def plot_three_component_log_envelope(
         print(f"[WARN] Failed to create log10 envelope plot: {e}")
 
 
+def plot_single_trace_log_envelope(
+    num_traces: int,
+    stack_vec: np.ndarray,
+    sample_rate: float,
+    t_abs: np.ndarray,
+    mask: np.ndarray,
+    start_time: float,
+    end_time: float,
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    save_dir: Path,
+    origin,
+    catalog_df,
+) -> None:
+    """Plot and save log10 envelope when there is a single trace."""
+    if num_traces != 1:
+        return
+    try:
+        env = np.abs(hilbert(stack_vec))
+        std_sec = 1.0
+        std_samples = max(1.0, float(sample_rate) * std_sec)
+        win_samples = max(3, int(round(6.0 * std_samples)))
+        gauss = gaussian(win_samples, std_samples)
+        gauss = gauss / np.sum(gauss)
+        env_smooth = np.convolve(env, gauss, mode="same")
+        log_env = np.log10(np.maximum(env_smooth, 1e-12))
+
+        fig_env, ax_env = plt.subplots(figsize=(12, 4.5))
+        set_figure_title(fig_env, f"{eve_id} {plot_comp} log10 envelope")
+        ax_env.plot(t_abs[mask], log_env[mask], color="k", lw=1.5)
+        ax_env.set_xlim(start_time, end_time)
+        ax_env.set_xlabel("Time since origin (s)", fontsize=11)
+        ax_env.set_ylabel("log10 envelope", fontsize=11)
+        ax_env.set_title(
+            f"Event {eve_id} - log10 envelope ({plot_comp})",
+            fontsize=12,
+            fontweight="bold",
+        )
+        ax_env.grid(alpha=0.2)
+        add_catalog_event_lines(ax_env, origin, catalog_df, start_time, end_time)
+        fig_env.subplots_adjust(bottom=0.28)
+
+        if origin is not None:
+            try:
+                add_utc_time_axis(ax_env, origin)
+            except Exception as e:
+                print(f"[WARN] Failed to add UTC time axis (single envelope): {e}")
+
+        env_file = save_dir / f"{eve_id}_{plot_comp}_log10_envelope_{align_phase_name}.png"
+        fig_env.savefig(env_file, dpi=300, bbox_inches="tight")
+        print(f"✓ Log10 envelope plot saved to: {env_file}")
+    except Exception as e:
+        print(f"[WARN] Failed to create log10 envelope plot (single trace): {e}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -681,43 +737,21 @@ def run_pipeline() -> None:
                     record_fig.savefig(save_file, dpi=300, bbox_inches="tight")
     
                 # ===================== Log10 envelope plot (single trace) =====================
-                if num_traces == 1:
-                    try:
-                        env = np.abs(hilbert(stack_vec))
-                        std_sec = 1.0
-                        std_samples = max(1.0, float(sample_rate) * std_sec)
-                        win_samples = max(3, int(round(6.0 * std_samples)))
-                        gauss = gaussian(win_samples, std_samples)
-                        gauss = gauss / np.sum(gauss)
-                        env_smooth = np.convolve(env, gauss, mode='same')
-                        log_env = np.log10(np.maximum(env_smooth, 1e-12))
-    
-                        fig_env, ax_env = plt.subplots(figsize=(12, 4.5))
-                        set_figure_title(fig_env, f"{eve_id} {plot_comp} log10 envelope")
-                        ax_env.plot(t_abs[mask], log_env[mask], color='k', lw=1.5)
-                        ax_env.set_xlim(start_time, end_time)
-                        ax_env.set_xlabel('Time since origin (s)', fontsize=11)
-                        ax_env.set_ylabel('log10 envelope', fontsize=11)
-                        ax_env.set_title(
-                            f'Event {eve_id} - log10 envelope ({plot_comp})',
-                            fontsize=12,
-                            fontweight='bold',
-                        )
-                        ax_env.grid(alpha=0.2)
-                        add_catalog_event_lines(ax_env, origin, catalog_local, start_time, end_time)
-                        fig_env.subplots_adjust(bottom=0.28)
-    
-                        if origin is not None:
-                            try:
-                                add_utc_time_axis(ax_env, origin)
-                            except Exception as e:
-                                print(f"[WARN] Failed to add UTC time axis (single envelope): {e}")
-    
-                        env_file = save_dir / f"{eve_id}_{plot_comp}_log10_envelope_{align_phase}.png"
-                        fig_env.savefig(env_file, dpi=300, bbox_inches='tight')
-                        print(f"✓ Log10 envelope plot saved to: {env_file}")
-                    except Exception as e:
-                        print(f"[WARN] Failed to create log10 envelope plot (single trace): {e}")
+                plot_single_trace_log_envelope(
+                    num_traces=num_traces,
+                    stack_vec=stack_vec,
+                    sample_rate=sample_rate,
+                    t_abs=t_abs,
+                    mask=mask,
+                    start_time=start_time,
+                    end_time=end_time,
+                    eve_id=eve_id,
+                    plot_comp=plot_comp,
+                    align_phase_name=align_phase,
+                    save_dir=save_dir,
+                    origin=origin,
+                    catalog_df=catalog_local,
+                )
     
                 # No Z-only R–T screening reuse.
                 # ===================== Estimated vs calculated shift plot (single component) =====================
