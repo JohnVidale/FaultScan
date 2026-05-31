@@ -1157,6 +1157,122 @@ def plot_three_component_estimated_vs_calculated_shifts(
         print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
 
 
+def render_three_component_panel(
+    fig,
+    gs,
+    idx: int,
+    comp_name: str,
+    comp_titles: list,
+    data: dict,
+    start_time: float,
+    end_time: float,
+) -> None:
+    """Render top record-section and bottom stack panel for one component."""
+    all_rows = data["all_rows"]
+    stack_vec = data["stack_vec"]
+    t_abs = data["t_abs"]
+    mask = data["mask"]
+    sample_rate = data["sample_rate"]
+    win_start = data["win_start"]
+    win_end = data["win_end"]
+    move_limit_sec = data["move_limit_sec"]
+    npts = data["npts"]
+    t_ref = data.get("t_ref")
+
+    ax = fig.add_subplot(gs[0, idx])
+
+    all_rows.sort(key=lambda t: t[0])
+    t_masked = t_abs[mask]
+
+    if len(all_rows) > 0 and np.any(mask):
+        A = np.vstack([row[2][mask] for row in all_rows])
+        dvec = np.array([row[0] for row in all_rows], dtype=float)
+
+        if len(dvec) == 1:
+            y_edges = np.array([dvec[0] - 0.5, dvec[0] + 0.5])
+        else:
+            mids = 0.5 * (dvec[1:] + dvec[:-1])
+            y_edges = np.empty(len(dvec) + 1)
+            y_edges[1:-1] = mids
+            y_edges[0] = dvec[0] - (mids[0] - dvec[0])
+            y_edges[-1] = dvec[-1] + (dvec[-1] - mids[-1])
+
+        if len(t_masked) == 1:
+            t_edges = np.array([t_masked[0] - 0.5 / sample_rate, t_masked[0] + 0.5 / sample_rate])
+        else:
+            tmids = 0.5 * (t_masked[1:] + t_masked[:-1])
+            t_edges = np.empty(len(t_masked) + 1)
+            t_edges[1:-1] = tmids
+            t_edges[0] = t_masked[0] - (tmids[0] - t_masked[0])
+            t_edges[-1] = t_masked[-1] + (t_masked[-1] - tmids[-1])
+
+        ax.pcolormesh(t_edges, y_edges, A, cmap="gray", shading="auto", vmin=-1.0, vmax=1.0)
+
+    ax.set_xlim(start_time, end_time)
+    if idx == 0:
+        ax.set_ylabel("Epicentral distance (km)", fontsize=11)
+    ax.set_title(f"{comp_titles[idx]}", fontsize=12, fontweight="bold")
+    ax.grid(alpha=0.2)
+
+    if t_ref is not None:
+        ax.axvline(x=t_ref, color="r", lw=2, alpha=0.6, linestyle="--", zorder=6)
+    try:
+        draw_correlation_markers(
+            ax,
+            start_time,
+            win_start,
+            win_end,
+            sample_rate,
+            move_limit_sec,
+            npts,
+        )
+    except Exception as e:
+        print(f"[WARN] Failed to draw correlation window bounds (top {comp_name}): {e}")
+
+    if idx == 0:
+        try:
+            n_pass_window = int(data.get("n_pass_window", 0))
+            legend_handles = [
+                Line2D([0], [0], color="y", lw=2, label="Correlation window"),
+                Line2D([0], [0], color="g", lw=2, label="Correlation search (±move_limit_sec)"),
+                Line2D([0], [0], color="none", label=f"Pass r_win: {n_pass_window}"),
+            ]
+            ax.legend(
+                handles=legend_handles,
+                loc="upper left",
+                bbox_to_anchor=(1.02, 1.0),
+                borderaxespad=0.0,
+                fontsize=9,
+            )
+        except Exception as e:
+            print(f"[WARN] Failed to add legend (top {comp_name}): {e}")
+
+    ax2 = fig.add_subplot(gs[1, idx])
+    ax2.plot(t_abs[mask], stack_vec[mask], color="C3", lw=2)
+    ax2.axhline(0.0, color="k", lw=0.6)
+    ax2.set_xlim(start_time, end_time)
+    ax2.set_xlabel("Time since origin (s)", fontsize=11)
+    if idx == 0:
+        ax2.set_ylabel("Stack (norm.)", fontsize=11)
+    ax2.set_ylim(-1.1, 1.1)
+    ax2.grid(alpha=0.2)
+
+    if t_ref is not None:
+        ax2.axvline(x=t_ref, color="r", lw=2, alpha=0.6, linestyle="--", zorder=6)
+    try:
+        draw_correlation_markers(
+            ax2,
+            start_time,
+            win_start,
+            win_end,
+            sample_rate,
+            move_limit_sec,
+            npts,
+        )
+    except Exception as e:
+        print(f"[WARN] Failed to draw correlation window bounds (bottom {comp_name}): {e}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1629,120 +1745,21 @@ def run_pipeline() -> None:
                 continue
     
             data = all_component_data[comp_name]
-            all_rows = data['all_rows']
             stack_vec = data['stack_vec']
             t_abs = data['t_abs']
             mask = data['mask']
-            sample_rate = data['sample_rate']
-            win_start = data['win_start']
-            win_end = data['win_end']
-            move_limit_sec = data['move_limit_sec']
-            npts = data['npts']
-            t_ref = data.get('t_ref')
     
             if show_record_section_plot:
-                # Top panel: record section
-                ax = fig.add_subplot(gs[0, idx])
-    
-                all_rows.sort(key=lambda t: t[0])
-                t_masked = t_abs[mask]
-    
-                if len(all_rows) > 0 and np.any(mask):
-                    A = np.vstack([row[2][mask] for row in all_rows])
-                    dvec = np.array([row[0] for row in all_rows], dtype=float)
-    
-                    # y-edges
-                    if len(dvec) == 1:
-                        y_edges = np.array([dvec[0] - 0.5, dvec[0] + 0.5])
-                    else:
-                        mids = 0.5 * (dvec[1:] + dvec[:-1])
-                        y_edges = np.empty(len(dvec) + 1)
-                        y_edges[1:-1] = mids
-                        y_edges[0] = dvec[0] - (mids[0] - dvec[0])
-                        y_edges[-1] = dvec[-1] + (dvec[-1] - mids[-1])
-    
-                    # t-edges
-                    if len(t_masked) == 1:
-                        t_edges = np.array([t_masked[0] - 0.5 / sample_rate,
-                                           t_masked[0] + 0.5 / sample_rate])
-                    else:
-                        tmids = 0.5 * (t_masked[1:] + t_masked[:-1])
-                        t_edges = np.empty(len(t_masked) + 1)
-                        t_edges[1:-1] = tmids
-                        t_edges[0] = t_masked[0] - (tmids[0] - t_masked[0])
-                        t_edges[-1] = t_masked[-1] + (t_masked[-1] - tmids[-1])
-    
-                    ax.pcolormesh(t_edges, y_edges, A, cmap='gray',
-                                 shading='auto', vmin=-1.0, vmax=1.0)
-    
-                ax.set_xlim(start_time, end_time)
-                if idx == 0:
-                    ax.set_ylabel('Epicentral distance (km)', fontsize=11)
-                ax.set_title(f'{comp_titles[idx]}', fontsize=12, fontweight='bold')
-                ax.grid(alpha=0.2)
-    
-                # Vertical reference line
-                if t_ref is not None:
-                    ax.axvline(x=t_ref, color='r', lw=2, alpha=0.6, linestyle='--', zorder=6)
-                # Cross-correlation window bounds
-                try:
-                    draw_correlation_markers(
-                        ax,
-                        start_time,
-                        win_start,
-                        win_end,
-                        sample_rate,
-                        move_limit_sec,
-                        npts,
-                    )
-                except Exception as e:
-                    print(f"[WARN] Failed to draw correlation window bounds (top {comp_name}): {e}")
-    
-                # Legend for window bounds (only once, top-left panel)
-                if idx == 0:
-                    try:
-                        n_pass_window = int(data.get('n_pass_window', 0))
-                        legend_handles = [
-                            Line2D([0], [0], color='y', lw=2, label='Correlation window'),
-                            Line2D([0], [0], color='g', lw=2, label='Correlation search (±move_limit_sec)'),
-                            Line2D([0], [0], color='none', label=f'Pass r_win: {n_pass_window}'),
-                        ]
-                        ax.legend(
-                            handles=legend_handles,
-                            loc='upper left',
-                            bbox_to_anchor=(1.02, 1.0),
-                            borderaxespad=0.0,
-                            fontsize=9,
-                        )
-                    except Exception as e:
-                        print(f"[WARN] Failed to add legend (top {comp_name}): {e}")
-    
-                # Bottom panel: stack
-                ax2 = fig.add_subplot(gs[1, idx])
-                ax2.plot(t_abs[mask], stack_vec[mask], color='C3', lw=2)
-                ax2.axhline(0.0, color='k', lw=0.6)
-                ax2.set_xlim(start_time, end_time)
-                ax2.set_xlabel('Time since origin (s)', fontsize=11)
-                if idx == 0:
-                    ax2.set_ylabel('Stack (norm.)', fontsize=11)
-                ax2.set_ylim(-1.1, 1.1)
-                ax2.grid(alpha=0.2)
-    
-                if t_ref is not None:
-                    ax2.axvline(x=t_ref, color='r', lw=2, alpha=0.6, linestyle='--', zorder=6)
-                # Cross-correlation window bounds
-                try:
-                    draw_correlation_markers(
-                        ax2,
-                        start_time,
-                        win_start,
-                        win_end,
-                        sample_rate,
-                        move_limit_sec,
-                        npts,
-                    )
-                except Exception as e:
-                    print(f"[WARN] Failed to draw correlation window bounds (bottom {comp_name}): {e}")
+                render_three_component_panel(
+                    fig=fig,
+                    gs=gs,
+                    idx=idx,
+                    comp_name=comp_name,
+                    comp_titles=comp_titles,
+                    data=data,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
     
             stack_by_comp[comp_name] = stack_vec
     
