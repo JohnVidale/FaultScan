@@ -1726,6 +1726,16 @@ def load_event_context_and_waveforms(
     )
 
 
+def unpack_event_context(event_context):
+    """Unpack the event context tuple returned by load_event_context_and_waveforms."""
+    return event_context
+
+
+def unpack_reference_phase_timing(ref_phase_timing):
+    """Unpack the timing tuple returned by prepare_reference_and_phase_timing."""
+    return ref_phase_timing
+
+
 def run_alignment_and_unpack(
     st_comp: Stream,
     ref_trace: Trace,
@@ -2077,7 +2087,7 @@ def run_pipeline() -> None:
                 name2ll,
                 st_window,
                 raw_limits_by_station,
-            ) = event_context
+            ) = unpack_event_context(event_context)
     
             st_comp, plot_comp = select_component_stream(
                 st_window=st_window,
@@ -2108,7 +2118,7 @@ def run_pipeline() -> None:
                 s_arrival_time,
                 phase_traveltime,
                 t_ref,
-            ) = ref_phase_timing
+            ) = unpack_reference_phase_timing(ref_phase_timing)
     
             num_traces = get_trace_count_or_skip(st_comp, plot_comp)
             if num_traces is None:
