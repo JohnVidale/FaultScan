@@ -1573,6 +1573,13 @@ def finalize_three_component_plotting(plot_wall_start: float, plot_cpu_start: fl
     plt.show()
 
 
+def print_three_component_banner() -> None:
+    """Print section banner for combined three-component plotting."""
+    print(f"\n{'='*70}")
+    print("Creating combined three-component plot...")
+    print(f"{'='*70}\n")
+
+
 def unpack_alignment_products(alignment: dict):
     """Return run_pipeline alignment outputs as a stable ordered tuple."""
     return (
@@ -2259,9 +2266,7 @@ def run_pipeline() -> None:
     # ===================== Three-component combined plotting =====================
     if process_as_three_comp and len(all_component_data) == 3:
         _plot3_wall_start, _plot3_cpu_start = start_plot_timing()
-        print(f"\\n{'='*70}")
-        print(f"Creating combined three-component plot...")
-        print(f"{'='*70}\\n")
+        print_three_component_banner()
     
         fig, gs = setup_three_component_record_figure(
             show_record=show_record_section_plot,
