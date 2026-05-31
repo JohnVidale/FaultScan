@@ -1622,6 +1622,43 @@ def store_three_component_data(
         plt.close(record_fig)
 
 
+def persist_three_component_outputs(
+    comp_order: list,
+    stack_by_comp: dict,
+    save_dir: Path,
+    eve_id: str,
+    origin_env,
+    start_time: float,
+    sample_rate_env: float,
+    show_record: bool,
+    fig,
+    align_phase_name: str,
+) -> Path:
+    """Write 3-component stack mSEEDs and optional combined figure, returning output dir."""
+    if all(comp in stack_by_comp for comp in comp_order):
+        save_dir = make_event_output_dir(path_prefix, eve_id)
+        write_component_stack_mseeds(
+            comp_order=comp_order,
+            stack_by_comp=stack_by_comp,
+            save_dir=save_dir,
+            eve_id=eve_id,
+            origin_env=origin_env,
+            start_time=start_time,
+            sample_rate_env=sample_rate_env,
+        )
+
+    if show_record:
+        save_dir = make_event_output_dir(path_prefix, eve_id)
+        finalize_three_component_record_figure(
+            fig=fig,
+            eve_id=eve_id,
+            align_phase_name=align_phase_name,
+            save_dir=save_dir,
+        )
+
+    return save_dir
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -2044,26 +2081,18 @@ def run_pipeline() -> None:
             mask=mask,
         )
     
-        if all(comp in stack_by_comp for comp in comp_order):
-            save_dir = make_event_output_dir(path_prefix, eve_id)
-            write_component_stack_mseeds(
-                comp_order=comp_order,
-                stack_by_comp=stack_by_comp,
-                save_dir=save_dir,
-                eve_id=eve_id,
-                origin_env=origin_env,
-                start_time=start_time,
-                sample_rate_env=sample_rate_env,
-            )
-    
-        if show_record_section_plot:
-            save_dir = make_event_output_dir(path_prefix, eve_id)
-            finalize_three_component_record_figure(
-                fig=fig,
-                eve_id=eve_id,
-                align_phase_name=align_phase,
-                save_dir=save_dir,
-            )
+        save_dir = persist_three_component_outputs(
+            comp_order=comp_order,
+            stack_by_comp=stack_by_comp,
+            save_dir=save_dir,
+            eve_id=eve_id,
+            origin_env=origin_env,
+            start_time=start_time,
+            sample_rate_env=sample_rate_env,
+            show_record=show_record_section_plot,
+            fig=fig,
+            align_phase_name=align_phase,
+        )
     
         # No R–T zero-diff station list saved.
         plot_three_component_summary_products(
