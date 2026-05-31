@@ -1671,17 +1671,6 @@ def prepare_reference_and_phase_timing(
         phase_traveltime,
         t_ref,
     )
-
-
-def get_trace_count_or_skip(st_comp: Stream, plot_comp: str):
-    """Return trace count for selected component, or None if no traces available."""
-    num_traces = len(st_comp)
-    print(f"    {num_traces} traces on {plot_comp}")
-    if num_traces == 0:
-        return None
-    return num_traces
-
-
 def load_event_context_and_waveforms(
     eve_id: str,
     channel: str,
@@ -1724,18 +1713,6 @@ def load_event_context_and_waveforms(
         st_window,
         raw_limits_by_station,
     )
-
-
-def unpack_event_context(event_context):
-    """Unpack the event context tuple returned by load_event_context_and_waveforms."""
-    return event_context
-
-
-def unpack_reference_phase_timing(ref_phase_timing):
-    """Unpack the timing tuple returned by prepare_reference_and_phase_timing."""
-    return ref_phase_timing
-
-
 def prepare_stream_reference_context(
     st_window: Stream,
     sel_comp: str,
@@ -1778,10 +1755,11 @@ def prepare_stream_reference_context(
         s_arrival_time,
         phase_traveltime,
         t_ref,
-    ) = unpack_reference_phase_timing(ref_phase_timing)
+    ) = ref_phase_timing
 
-    num_traces = get_trace_count_or_skip(st_comp, plot_comp)
-    if num_traces is None:
+    num_traces = len(st_comp)
+    print(f"    {num_traces} traces on {plot_comp}")
+    if num_traces == 0:
         return None
 
     return (
@@ -2112,7 +2090,7 @@ def run_pipeline() -> None:
                 name2ll,
                 st_window,
                 raw_limits_by_station,
-            ) = unpack_event_context(event_context)
+            ) = event_context
     
             stream_ref_context = prepare_stream_reference_context(
                 st_window=st_window,
