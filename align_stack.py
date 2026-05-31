@@ -2213,6 +2213,61 @@ def setup_three_component_plot_run(
     )
 
 
+def handle_three_component_outputs_and_finalize(
+    comp_order,
+    stack_by_comp,
+    save_dir: Path,
+    eve_id: str,
+    origin_env,
+    start_time,
+    sample_rate_env: float,
+    show_record: bool,
+    fig,
+    align_phase_name: str,
+    all_component_data: dict,
+    t_abs,
+    mask,
+    end_time,
+    catalog_df,
+    pass_window_ids: set,
+    plot_wall_start: float,
+    plot_cpu_start: float,
+) -> None:
+    """Persist three-component outputs, generate summaries, and report timing."""
+    save_dir = persist_three_component_outputs(
+        comp_order=comp_order,
+        stack_by_comp=stack_by_comp,
+        save_dir=save_dir,
+        eve_id=eve_id,
+        origin_env=origin_env,
+        start_time=start_time,
+        sample_rate_env=sample_rate_env,
+        show_record=show_record,
+        fig=fig,
+        align_phase_name=align_phase_name,
+    )
+
+    # No R-T zero-diff station list saved.
+    plot_three_component_summary_products(
+        all_component_data=all_component_data,
+        comp_order=comp_order,
+        stack_by_comp=stack_by_comp,
+        sample_rate_env=sample_rate_env,
+        t_abs=t_abs,
+        mask=mask,
+        start_time=start_time,
+        end_time=end_time,
+        eve_id=eve_id,
+        align_phase_name=align_phase_name,
+        save_dir=save_dir,
+        origin_env=origin_env,
+        catalog_df=catalog_df,
+        pass_window_ids=pass_window_ids,
+    )
+
+    finalize_three_component_plotting(plot_wall_start, plot_cpu_start)
+
+
 def should_run_three_component_combined(process_as_three_comp: bool, all_component_data: dict) -> bool:
     """Return whether combined three-component plotting should execute."""
     return process_as_three_comp and len(all_component_data) == 3
@@ -2479,7 +2534,7 @@ def run_pipeline() -> None:
             mask=mask,
         )
     
-        save_dir = persist_three_component_outputs(
+        handle_three_component_outputs_and_finalize(
             comp_order=comp_order,
             stack_by_comp=stack_by_comp,
             save_dir=save_dir,
@@ -2490,27 +2545,15 @@ def run_pipeline() -> None:
             show_record=show_record_section_plot,
             fig=fig,
             align_phase_name=align_phase,
-        )
-    
-        # No R–T zero-diff station list saved.
-        plot_three_component_summary_products(
             all_component_data=all_component_data,
-            comp_order=comp_order,
-            stack_by_comp=stack_by_comp,
-            sample_rate_env=sample_rate_env,
             t_abs=t_abs,
             mask=mask,
-            start_time=start_time,
             end_time=end_time,
-            eve_id=eve_id,
-            align_phase_name=align_phase,
-            save_dir=save_dir,
-            origin_env=origin_env,
             catalog_df=catalog_local,
             pass_window_ids=pass_window_ids,
+            plot_wall_start=_plot3_wall_start,
+            plot_cpu_start=_plot3_cpu_start,
         )
-    
-        finalize_three_component_plotting(_plot3_wall_start, _plot3_cpu_start)
 
 def main() -> None:
     run_pipeline()
