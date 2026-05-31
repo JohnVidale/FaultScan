@@ -1996,6 +1996,35 @@ def init_three_component_caches():
     """Create empty containers used across three-component processing."""
     return {}, {}, {}
 
+
+def maybe_plot_stage_stacks(
+    all_channels_mode: bool,
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    t_abs,
+    mask,
+    aligned_stack,
+    selected_aligned_stack,
+    stack_vec,
+    save_dir: Path,
+) -> None:
+    """Plot stage stacks only for single-component mode."""
+    if all_channels_mode:
+        return
+
+    plot_stage_stacks(
+        eve_id=eve_id,
+        plot_comp=plot_comp,
+        align_phase_name=align_phase_name,
+        t_abs=t_abs,
+        mask=mask,
+        aligned_stack=aligned_stack,
+        selected_aligned_stack=selected_aligned_stack,
+        stack_vec=stack_vec,
+        save_dir=save_dir,
+    )
+
 def run_pipeline() -> None:
     global align_phase, move_limit_sec, start_time, end_time
     save_dir = Path(path_prefix + "output")
@@ -2122,18 +2151,18 @@ def run_pipeline() -> None:
     
             # ---- Plot: superposition of Stage1/Stage2/Final stacks ----
             _plot_wall_start, _plot_cpu_start = start_plot_timing()
-            if not all_channels:
-                plot_stage_stacks(
-                    eve_id=eve_id,
-                    plot_comp=plot_comp,
-                    align_phase_name=align_phase,
-                    t_abs=t_abs,
-                    mask=mask,
-                    aligned_stack=aligned_stack,
-                    selected_aligned_stack=selected_aligned_stack,
-                    stack_vec=stack_vec,
-                    save_dir=save_dir,
-                )
+            maybe_plot_stage_stacks(
+                all_channels_mode=all_channels,
+                eve_id=eve_id,
+                plot_comp=plot_comp,
+                align_phase_name=align_phase,
+                t_abs=t_abs,
+                mask=mask,
+                aligned_stack=aligned_stack,
+                selected_aligned_stack=selected_aligned_stack,
+                stack_vec=stack_vec,
+                save_dir=save_dir,
+            )
     
             # ---- Plot: record section (top) + stack (bottom) ----
             record_fig = plot_record_section_and_stack(
