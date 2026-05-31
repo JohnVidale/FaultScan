@@ -1675,6 +1675,50 @@ def get_trace_count_or_skip(st_comp: Stream, plot_comp: str):
     return num_traces
 
 
+def load_event_context_and_waveforms(
+    eve_id: str,
+    channel: str,
+    process_as_three_comp: bool,
+    horizontal_window_cache: dict,
+    horizontal_raw_limits_cache: dict,
+):
+    """Load event metadata/station lookup and read event waveforms for one channel."""
+    event_depth, eve_lat, eve_lon, origin = load_event_metadata(eve_id, info_root)
+    save_dir = make_event_output_dir(path_prefix, eve_id)
+    name2ll = load_station_lookup(info_root)
+
+    st_window, raw_limits_by_station = read_waveforms_for_event(
+        eve_id=eve_id,
+        channel=channel,
+        process_as_three_comp_mode=process_as_three_comp,
+        horizontal_window_cache=horizontal_window_cache,
+        horizontal_raw_limits_cache=horizontal_raw_limits_cache,
+        name2ll=name2ll,
+        eve_lat=eve_lat,
+        eve_lon=eve_lon,
+        origin=origin,
+        data_path=data_path,
+        sps_rate=sps_rate,
+        start_time=start_time,
+        end_time=end_time,
+        verbose=verbose,
+        timing_state=timing_state,
+    )
+    if st_window is None:
+        return None
+
+    return (
+        event_depth,
+        eve_lat,
+        eve_lon,
+        origin,
+        save_dir,
+        name2ll,
+        st_window,
+        raw_limits_by_station,
+    )
+
+
 def store_three_component_data(
     all_component_data: dict,
     channel: str,
@@ -1945,32 +1989,26 @@ def run_pipeline() -> None:
     
         for eve_id in events:
             print(f"==========Processing event {eve_id}===========")
-    
-            # ---- Read event info ----
-            event_depth, eve_lat, eve_lon, origin = load_event_metadata(eve_id, info_root)
-            save_dir = make_event_output_dir(path_prefix, eve_id)
-            name2ll = load_station_lookup(info_root)
-    
-            # ---- Read waveforms for all stations ----
-            st_window, raw_limits_by_station = read_waveforms_for_event(
+
+            event_context = load_event_context_and_waveforms(
                 eve_id=eve_id,
                 channel=channel,
-                process_as_three_comp_mode=process_as_three_comp,
+                process_as_three_comp=process_as_three_comp,
                 horizontal_window_cache=horizontal_window_cache,
                 horizontal_raw_limits_cache=horizontal_raw_limits_cache,
-                name2ll=name2ll,
-                eve_lat=eve_lat,
-                eve_lon=eve_lon,
-                origin=origin,
-                data_path=data_path,
-                sps_rate=sps_rate,
-                start_time=start_time,
-                end_time=end_time,
-                verbose=verbose,
-                timing_state=timing_state,
             )
-            if st_window is None:
+            if event_context is None:
                 continue
+            (
+                event_depth,
+                eve_lat,
+                eve_lon,
+                origin,
+                save_dir,
+                name2ll,
+                st_window,
+                raw_limits_by_station,
+            ) = event_context
     
             st_comp, plot_comp = select_component_stream(
                 st_window=st_window,
