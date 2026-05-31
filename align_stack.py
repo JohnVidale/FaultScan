@@ -28,6 +28,8 @@ from align_utils import (
     make_event_output_dir,
     report_timing_once,
     resolve_component_key,
+    select_reference_trace,
+    print_reference_summary,
     set_figure_title,
     shift_left_zeropad,
     TimingState,
@@ -373,65 +375,6 @@ def read_waveforms_for_event(
         horizontal_raw_limits_cache[eve_id] = raw_limits_by_station.copy()
 
     return st_window, raw_limits_by_station
-
-
-def select_reference_trace(st_comp: Stream, name2ll: dict):
-    """Pick reference station closest to array center and return (id, trace)."""
-    st_comp.sort(keys=["dist_km"])
-    if len(st_comp) == 0:
-        return None, None
-
-    station_ids = sorted({str(tr.stats.station) for tr in st_comp})
-    center_lats = [name2ll[s][0] for s in station_ids if s in name2ll]
-    center_lons = [name2ll[s][1] for s in station_ids if s in name2ll]
-
-    ref_station_id = None
-    if len(center_lats) > 0 and len(center_lons) > 0:
-        center_lat = float(np.mean(center_lats))
-        center_lon = float(np.mean(center_lons))
-        best_dist_m = None
-        for sid in station_ids:
-            if sid not in name2ll:
-                continue
-            slat, slon = name2ll[sid]
-            dist_m, _, _ = gps2dist_azimuth(center_lat, center_lon, slat, slon)
-            if best_dist_m is None or dist_m < best_dist_m:
-                best_dist_m = dist_m
-                ref_station_id = sid
-
-    if ref_station_id is None:
-        ref_station_id = str(st_comp[0].stats.station)
-
-    ref_trace = st_comp.select(station=ref_station_id)
-    if len(ref_trace) == 0:
-        ref_trace = [st_comp[0]]
-        ref_station_id = str(ref_trace[0].stats.station)
-    return ref_station_id, ref_trace[0]
-
-
-def print_reference_summary(ref_station_id: str, ref_trace: Trace, raw_limits_by_station: dict):
-    """Print reference station and data-window summary."""
-    ref_trace_dur = float(ref_trace.stats.npts) / float(ref_trace.stats.sampling_rate)
-    print(
-        f"    Reference station (auto): {ref_station_id} (closest to array center)  "
-        f"dist_km={ref_trace.stats.dist_km:.2f}  dur_s={ref_trace_dur:.2f}"
-    )
-    print(f"    Epicentral distance ≈ {ref_trace.stats.dist_km:.1f} km")
-
-    ref_start_dt = ensure_utc_datetime(ref_trace.stats.starttime.datetime)
-    ref_end_dt = ensure_utc_datetime(ref_trace.stats.endtime.datetime)
-    print(
-        "\033[32m    Reference seismogram UTC window: "
-        f"{ref_start_dt.isoformat()} to {ref_end_dt.isoformat()}\033[0m"
-    )
-    if ref_station_id in raw_limits_by_station:
-        raw_start, raw_end = raw_limits_by_station[ref_station_id]
-        raw_start_dt = ensure_utc_datetime(raw_start.datetime)
-        raw_end_dt = ensure_utc_datetime(raw_end.datetime)
-        print(
-            "\033[32m    Reference read UTC window: "
-            f"{raw_start_dt.isoformat()} to {raw_end_dt.isoformat()}\033[0m"
-        )
 
 
 def compute_phase_travel_times(model_obj, event_depth: float, ref_trace: Trace, origin_time, align_phase_name: str):
