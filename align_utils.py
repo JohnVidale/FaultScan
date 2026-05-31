@@ -504,6 +504,92 @@ def compute_stage2_screened_stack(
     }
 
 
+def compute_stage3_finalized_rows(
+    st_comp,
+    ref: np.ndarray,
+    ref_station_id: str,
+    selected_ids: set,
+    calc_shifts: dict,
+    npts: int,
+    sample_rate: float,
+    win_start: int,
+    win_end: int,
+    move_limit_samples: int,
+    name2ll: dict,
+    eve_lat: float,
+    eve_lon: float,
+    timing_state: TimingState,
+):
+    """Stage 3: align traces on reference timebase and build selected/rejected rows."""
+    selected_rows = []  # (dist_km, station_id, y_aligned_norm)
+    rejected_rows = []
+    aligned_bank = []
+    aligned_bank_all = []
+    station_shifts = {}
+    aligned_traces_by_station = {}
+
+    _stage3_wall_start = time.perf_counter()
+    _stage3_cpu_start = time.process_time()
+    for tr in st_comp:
+        x = tr.data[:npts]
+        station_id = str(tr.stats.station)
+
+        if station_id == ref_station_id:
+            lag3 = 0
+            y = x.copy()
+        else:
+            if station_id in calc_shifts:
+                expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
+                x_expected = shift_left_zeropad(x, expected_shift_samples)
+                lag_delta = compute_lag(
+                    ref, x_expected, win_start, win_end, move_limit_samples
+                )
+                lag3 = expected_shift_samples + lag_delta
+            else:
+                lag3 = compute_lag(ref, x, win_start, win_end, move_limit_samples)
+            y = shift_left_zeropad(x, lag3)
+
+        station_shifts[station_id] = {
+            "lag_samples": lag3,
+            "lag_seconds": lag3 / sample_rate,
+        }
+
+        win = y[win_start:win_end]
+        my = np.max(np.abs(win)) if win.size > 0 else 1.0
+        if my > 0:
+            y = y / my
+
+        aligned_traces_by_station[station_id] = y.copy()
+        aligned_bank_all.append(y)
+
+        slat, slon = name2ll[station_id]
+        dist_m, _, _ = gps2dist_azimuth(eve_lat, eve_lon, slat, slon)
+        dist_km = dist_m / 1000.0
+
+        if station_id in selected_ids:
+            selected_rows.append((dist_km, station_id, y))
+            aligned_bank.append(y)
+        else:
+            rejected_rows.append((dist_km, station_id, y))
+    add_stage_timing(timing_state, "align_stage3_finalize", _stage3_wall_start, _stage3_cpu_start)
+
+    selected_rows.sort(key=lambda t: t[0])
+    rejected_rows.sort(key=lambda t: t[0])
+    print(
+        f"    Final lag3 traces: selected={len(selected_rows)}, "
+        f"rejected={len(rejected_rows)}, total={len(selected_rows) + len(rejected_rows)}"
+    )
+
+    return {
+        "selected_rows": selected_rows,
+        "rejected_rows": rejected_rows,
+        "aligned_bank": aligned_bank,
+        "aligned_bank_all": aligned_bank_all,
+        "station_shifts": station_shifts,
+        "aligned_traces_by_station": aligned_traces_by_station,
+    }
+
+
 def compute_lag(
     ref: np.ndarray,
     d: np.ndarray,

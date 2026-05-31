@@ -21,7 +21,7 @@ from align_utils import (
     compute_phase_travel_times,
     compute_stage1_aligned_stack,
     compute_stage2_screened_stack,
-    compute_lag,
+    compute_stage3_finalized_rows,
     correlation_time_bounds,
     draw_correlation_markers,
     ensure_utc_datetime,
@@ -35,7 +35,6 @@ from align_utils import (
     select_reference_trace,
     print_reference_summary,
     set_figure_title,
-    shift_left_zeropad,
     TimingState,
 )
 
@@ -356,65 +355,27 @@ def compute_alignment_products(
     ref_window = stage2_products["ref_window"]
 
     # ===================== Final alignment for plotting (lag3 to reference) =====================
-    selected_rows = []  # (dist_km, station_id, y_aligned_norm)
-    rejected_rows = []
-    aligned_bank = []
-    aligned_bank_all = []
-    station_shifts = {}
-    aligned_traces_by_station = {}
-
-    _stage3_wall_start = time.perf_counter()
-    _stage3_cpu_start = time.process_time()
-    for tr in st_comp:
-        x = tr.data[:npts]
-        station_id = str(tr.stats.station)
-
-        # Final alignment keeps x-axis on the reference station time base.
-        if station_id == ref_station_id:
-            lag3 = 0
-            y = x.copy()
-        else:
-            if station_id in calc_shifts:
-                expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
-                x_expected = shift_left_zeropad(x, expected_shift_samples)
-                lag_delta = compute_lag(
-                    ref, x_expected, win_start, win_end, move_limit_samples
-                )
-                lag3 = expected_shift_samples + lag_delta
-            else:
-                lag3 = compute_lag(ref, x, win_start, win_end, move_limit_samples)
-            y = shift_left_zeropad(x, lag3)
-
-        station_shifts[station_id] = {
-            "lag_samples": lag3,
-            "lag_seconds": lag3 / sample_rate,
-        }
-
-        win = y[win_start:win_end]
-        my = np.max(np.abs(win)) if win.size > 0 else 1.0
-        if my > 0:
-            y = y / my
-
-        aligned_traces_by_station[station_id] = y.copy()
-        aligned_bank_all.append(y)
-
-        slat, slon = name2ll[station_id]
-        dist_m, _, _ = gps2dist_azimuth(eve_lat, eve_lon, slat, slon)
-        dist_km = dist_m / 1000.0
-
-        if station_id in selected_ids:
-            selected_rows.append((dist_km, station_id, y))
-            aligned_bank.append(y)
-        else:
-            rejected_rows.append((dist_km, station_id, y))
-    add_stage_timing(timing_state, "align_stage3_finalize", _stage3_wall_start, _stage3_cpu_start)
-
-    selected_rows.sort(key=lambda t: t[0])
-    rejected_rows.sort(key=lambda t: t[0])
-    print(
-        f"    Final lag3 traces: selected={len(selected_rows)}, "
-        f"rejected={len(rejected_rows)}, total={len(selected_rows) + len(rejected_rows)}"
+    stage3_products = compute_stage3_finalized_rows(
+        st_comp=st_comp,
+        ref=ref,
+        ref_station_id=ref_station_id,
+        selected_ids=selected_ids,
+        calc_shifts=calc_shifts,
+        npts=npts,
+        sample_rate=sample_rate,
+        win_start=win_start,
+        win_end=win_end,
+        move_limit_samples=move_limit_samples,
+        name2ll=name2ll,
+        eve_lat=eve_lat,
+        eve_lon=eve_lon,
+        timing_state=timing_state,
     )
+    selected_rows = stage3_products["selected_rows"]
+    rejected_rows = stage3_products["rejected_rows"]
+    aligned_bank_all = stage3_products["aligned_bank_all"]
+    station_shifts = stage3_products["station_shifts"]
+    aligned_traces_by_station = stage3_products["aligned_traces_by_station"]
 
     # ---- Time axis (seconds since origin) ----
     t_abs = start_time + (np.arange(npts) / sample_rate)
