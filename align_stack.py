@@ -20,6 +20,7 @@ from align_utils import (
     build_component_output_payload,
     compute_phase_travel_times,
     compute_stage1_aligned_stack,
+    compute_stage2_screened_stack,
     compute_lag,
     correlation_time_bounds,
     draw_correlation_markers,
@@ -334,68 +335,25 @@ def compute_alignment_products(
     )
 
     # ===================== Stage 2: align to aligned_stack -> select traces =====================
-    selected_aligned_stack = np.zeros(npts)
-    selected_ids = set()
-    station_corr = {}
-    n_pass_window = 0
-    pass_window_ids = set()
-    snippet_by_station = {}
-
-    _stage2_wall_start = time.perf_counter()
-    _stage2_cpu_start = time.process_time()
-    for tr in st_comp:
-        d = tr.data[:npts]
-        station_id = str(tr.stats.station)
-
-        lag0 = 0
-        rolled = shift_left_zeropad(d, lag0)
-
-        # Stage-2 alignment: include TauP expected shift + correlation correction
-        if station_id in calc_shifts:
-            expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
-            rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
-            lag2 = expected_shift_samples + compute_lag(
-                aligned_stack,
-                rolled_expected,
-                win_start,
-                win_end,
-                move_limit_samples,
-            )
-        else:
-            lag2 = lag0 + compute_lag(
-                aligned_stack, rolled, win_start, win_end, move_limit_samples
-            )
-
-        aligned_data = shift_left_zeropad(d, lag2)
-        ref_window = aligned_stack[win_start:win_end]
-        aligned_window = aligned_data[win_start:win_end]
-        snippet_by_station[station_id] = aligned_window.copy()
-
-        if np.linalg.norm(aligned_window) == 0 or np.linalg.norm(ref_window) == 0:
-            r_window = 0.0
-        else:
-            r_window = float(
-                np.dot(aligned_window, ref_window)
-                / (np.linalg.norm(aligned_window) * np.linalg.norm(ref_window))
-            )
-
-        if r_window >= r_window_min:
-            n_pass_window += 1
-            pass_window_ids.add(station_id)
-
-        station_corr[station_id] = r_window
-
-        if r_window >= r_window_min:
-            selected_aligned_stack += aligned_data
-            selected_ids.add(station_id)
-        else:
-            print(f"    Rejected {station_id}: r_win={r_window:.2f}")
-    add_stage_timing(timing_state, "align_stage2_screen", _stage2_wall_start, _stage2_cpu_start)
-
-    win = selected_aligned_stack[win_start:win_end]
-    mx = np.max(np.abs(win)) if win.size > 0 else 0.0
-    if mx > 0:
-        selected_aligned_stack = selected_aligned_stack / mx
+    stage2_products = compute_stage2_screened_stack(
+        st_comp=st_comp,
+        aligned_stack=aligned_stack,
+        npts=npts,
+        sample_rate=sample_rate,
+        win_start=win_start,
+        win_end=win_end,
+        move_limit_samples=move_limit_samples,
+        calc_shifts=calc_shifts,
+        r_window_min=r_window_min,
+        timing_state=timing_state,
+    )
+    selected_aligned_stack = stage2_products["selected_aligned_stack"]
+    selected_ids = stage2_products["selected_ids"]
+    station_corr = stage2_products["station_corr"]
+    n_pass_window = stage2_products["n_pass_window"]
+    pass_window_ids = stage2_products["pass_window_ids"]
+    snippet_by_station = stage2_products["snippet_by_station"]
+    ref_window = stage2_products["ref_window"]
 
     # ===================== Final alignment for plotting (lag3 to reference) =====================
     selected_rows = []  # (dist_km, station_id, y_aligned_norm)
