@@ -2105,6 +2105,11 @@ def maybe_plot_stage_stacks(
         save_dir=save_dir,
     )
 
+
+def should_run_three_component_combined(process_as_three_comp: bool, all_component_data: dict) -> bool:
+    """Return whether combined three-component plotting should execute."""
+    return process_as_three_comp and len(all_component_data) == 3
+
 def run_pipeline() -> None:
     global align_phase, move_limit_sec, start_time, end_time
     save_dir = Path(path_prefix + "output")
@@ -2330,7 +2335,7 @@ def run_pipeline() -> None:
     
     
     # ===================== Three-component combined plotting =====================
-    if process_as_three_comp and len(all_component_data) == 3:
+    if should_run_three_component_combined(process_as_three_comp, all_component_data):
         _plot3_wall_start, _plot3_cpu_start = start_plot_timing()
         print_three_component_banner()
     
