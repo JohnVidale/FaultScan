@@ -137,6 +137,67 @@ class AlignStackSmokeTests(unittest.TestCase):
         self.assertEqual(out[2], "STA")
         self.assertEqual(out[3], fake_ref)
 
+    def test_load_event_context_and_waveforms_returns_none_when_no_waveforms(self):
+        with patch.object(
+            self.mod,
+            "load_event_metadata",
+            return_value=(10.0, 35.0, -117.0, None),
+        ), patch.object(
+            self.mod,
+            "make_event_output_dir",
+            return_value="/tmp/out",
+        ), patch.object(
+            self.mod,
+            "load_station_lookup",
+            return_value={"STA": (35.0, -117.0)},
+        ), patch.object(
+            self.mod,
+            "read_waveforms_for_event",
+            return_value=(None, None),
+        ):
+            out = self.mod.load_event_context_and_waveforms(
+                eve_id="E1",
+                channel="DPZ",
+                process_as_three_comp=False,
+                horizontal_window_cache={},
+                horizontal_raw_limits_cache={},
+            )
+        self.assertIsNone(out)
+
+    def test_load_event_context_and_waveforms_success_shape(self):
+        fake_stream = object()
+        fake_limits = {"STA": (0.0, 1.0)}
+        with patch.object(
+            self.mod,
+            "load_event_metadata",
+            return_value=(10.0, 35.0, -117.0, None),
+        ), patch.object(
+            self.mod,
+            "make_event_output_dir",
+            return_value="/tmp/out",
+        ), patch.object(
+            self.mod,
+            "load_station_lookup",
+            return_value={"STA": (35.0, -117.0)},
+        ), patch.object(
+            self.mod,
+            "read_waveforms_for_event",
+            return_value=(fake_stream, fake_limits),
+        ):
+            out = self.mod.load_event_context_and_waveforms(
+                eve_id="E1",
+                channel="DPZ",
+                process_as_three_comp=False,
+                horizontal_window_cache={},
+                horizontal_raw_limits_cache={},
+            )
+
+        self.assertIsNotNone(out)
+        self.assertEqual(len(out), 8)
+        self.assertEqual(out[0], 10.0)
+        self.assertEqual(out[6], fake_stream)
+        self.assertEqual(out[7], fake_limits)
+
 
 if __name__ == "__main__":
     unittest.main()
