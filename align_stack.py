@@ -1991,6 +1991,11 @@ def compute_alignment_products(
         stack_vec=stack_vec,
     )
 
+
+def init_three_component_caches():
+    """Create empty containers used across three-component processing."""
+    return {}, {}, {}
+
 def run_pipeline() -> None:
     global align_phase, move_limit_sec, start_time, end_time
     save_dir = Path(path_prefix + "output")
@@ -2004,9 +2009,11 @@ def run_pipeline() -> None:
     # ===================== Main loop =====================
     # Storage for three-component mode
     if process_as_three_comp:
-        all_component_data = {}
-        horizontal_window_cache = {}
-        horizontal_raw_limits_cache = {}
+        (
+            all_component_data,
+            horizontal_window_cache,
+            horizontal_raw_limits_cache,
+        ) = init_three_component_caches()
     
     for idx, channel in enumerate(channels):
         sel_comp = sel_comp_list[idx]
