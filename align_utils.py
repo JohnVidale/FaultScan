@@ -415,6 +415,36 @@ def compute_taup_station_shifts(
     return calc_shifts
 
 
+def compute_alignment_setup(
+    st_comp,
+    ref_trace,
+    move_limit_sec: float,
+    start_time: float,
+    win_pre: float,
+    win_post: float,
+    t_ref,
+):
+    """Compute shared setup values used across alignment stages."""
+    npts = min(tr.stats.npts for tr in st_comp)
+    sample_rate = float(st_comp[0].stats.sampling_rate)
+    ref = ref_trace.data[:npts]
+    move_limit_samples = int(round(move_limit_sec * sample_rate))
+
+    t0 = float(t_ref) if t_ref is not None else 0.0
+    center_time = t0
+    win_start = int(max(0, sample_rate * ((center_time - start_time) - win_pre)))
+    win_end = int(min(npts, sample_rate * ((center_time - start_time) + win_post)))
+
+    return {
+        "npts": npts,
+        "sample_rate": sample_rate,
+        "ref": ref,
+        "move_limit_samples": move_limit_samples,
+        "win_start": win_start,
+        "win_end": win_end,
+    }
+
+
 def normalize_traces_in_window(st_comp, win_start: int, win_end: int) -> None:
     """Normalize each trace by max amplitude within the correlation window."""
     for tr in st_comp:

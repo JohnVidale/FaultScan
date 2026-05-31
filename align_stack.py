@@ -31,6 +31,7 @@ from align_utils import (
     load_event_metadata,
     load_station_lookup,
     make_event_output_dir,
+    compute_alignment_setup,
     normalize_traces_in_window,
     report_timing_once,
     read_waveforms_for_event,
@@ -278,18 +279,23 @@ def compute_alignment_products(
     t_ref,
 ):
     """Run alignment stages and return all products needed by plotting/output."""
-    # ---- Common length / sampling rate ----
-    npts = min(tr.stats.npts for tr in st_comp)
-    sample_rate = float(st_comp[0].stats.sampling_rate)
-    ref = ref_trace.data[:npts]
-    move_limit_samples = int(round(move_limit_sec * sample_rate))
+    # ---- Common length / sampling rate / windows ----
+    setup = compute_alignment_setup(
+        st_comp=st_comp,
+        ref_trace=ref_trace,
+        move_limit_sec=move_limit_sec,
+        start_time=start_time,
+        win_pre=win_pre,
+        win_post=win_post,
+        t_ref=t_ref,
+    )
+    npts = setup["npts"]
+    sample_rate = setup["sample_rate"]
+    ref = setup["ref"]
+    move_limit_samples = setup["move_limit_samples"]
+    win_start = setup["win_start"]
+    win_end = setup["win_end"]
     print(f"    sample_rate = {sample_rate:.1f} Hz")
-
-    # ---- Correlation window indices ----
-    t0 = float(t_ref) if t_ref is not None else 0.0
-    center_time = t0
-    win_start = int(max(0, sample_rate * ((center_time - start_time) - win_pre)))
-    win_end = int(min(npts, sample_rate * ((center_time - start_time) + win_post)))
 
     # ---- Normalize per trace using only the correlation window ----
     normalize_traces_in_window(st_comp, win_start, win_end)
