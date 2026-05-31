@@ -415,6 +415,15 @@ def compute_taup_station_shifts(
     return calc_shifts
 
 
+def normalize_traces_in_window(st_comp, win_start: int, win_end: int) -> None:
+    """Normalize each trace by max amplitude within the correlation window."""
+    for tr in st_comp:
+        win = tr.data[win_start:win_end]
+        mx = np.max(np.abs(win)) if win.size > 0 else 0.0
+        if mx > 0:
+            tr.data = tr.data / mx
+
+
 def compute_stage1_aligned_stack(
     st_comp,
     ref: np.ndarray,

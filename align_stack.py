@@ -31,6 +31,7 @@ from align_utils import (
     load_event_metadata,
     load_station_lookup,
     make_event_output_dir,
+    normalize_traces_in_window,
     report_timing_once,
     read_waveforms_for_event,
     resolve_component_key,
@@ -291,11 +292,7 @@ def compute_alignment_products(
     win_end = int(min(npts, sample_rate * ((center_time - start_time) + win_post)))
 
     # ---- Normalize per trace using only the correlation window ----
-    for tr in st_comp:
-        win = tr.data[win_start:win_end]
-        mx = np.max(np.abs(win)) if win.size > 0 else 0.0
-        if mx > 0:
-            tr.data = tr.data / mx
+    normalize_traces_in_window(st_comp, win_start, win_end)
 
     # ---- Theoretical (TauP) shift per station relative to reference station ----
     calc_shifts = compute_taup_station_shifts(
