@@ -386,6 +386,44 @@ def plot_single_trace_log_envelope(
         print(f"[WARN] Failed to create log10 envelope plot (single trace): {e}")
 
 
+def plot_estimated_vs_calculated_shifts(
+    calc_shifts: dict,
+    station_shifts: dict,
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    save_dir: Path,
+) -> None:
+    """Plot estimated shift versus TauP-calculated shift for stations with both values."""
+    common_sta = set(calc_shifts.keys()) & set(station_shifts.keys())
+    if len(common_sta) == 0:
+        print("[WARN] No stations with both estimated and calculated shifts for comparison.")
+        return
+
+    stations = sorted(common_sta, key=lambda s: int(s))
+    est_shift = np.array([station_shifts[s]["lag_seconds"] for s in stations], dtype=float)
+    calc_shift = np.array([calc_shifts[s] for s in stations], dtype=float)
+
+    fig_ec, ax_ec = plt.subplots(1, 1, figsize=(6.2, 5.2))
+    set_figure_title(fig_ec, f"{eve_id} {plot_comp} est vs calc shifts")
+    ax_ec.scatter(calc_shift, est_shift, s=20, alpha=0.6)
+
+    minv = float(min(np.min(calc_shift), np.min(est_shift)))
+    maxv = float(max(np.max(calc_shift), np.max(est_shift)))
+    ax_ec.plot([minv, maxv], [minv, maxv], "r--", lw=1.2, alpha=0.7, label="1:1 line")
+
+    ax_ec.set_xlabel("Calculated shift (s)")
+    ax_ec.set_ylabel("Estimated shift (s)")
+    ax_ec.set_title(f"Event {eve_id} {plot_comp}: Estimated vs Calculated shifts")
+    ax_ec.grid(alpha=0.3)
+    ax_ec.legend(loc="upper left", fontsize=9)
+    plt.tight_layout()
+
+    estcalc_file = save_dir / f"{eve_id}_{plot_comp}_est_vs_calc_shift_{align_phase_name}.png"
+    fig_ec.savefig(estcalc_file, dpi=300, bbox_inches="tight")
+    print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -755,32 +793,14 @@ def run_pipeline() -> None:
     
                 # No Z-only R–T screening reuse.
                 # ===================== Estimated vs calculated shift plot (single component) =====================
-                common_sta = set(calc_shifts.keys()) & set(station_shifts.keys())
-                if len(common_sta) == 0:
-                    print("[WARN] No stations with both estimated and calculated shifts for comparison.")
-                else:
-                    stations = sorted(common_sta, key=lambda s: int(s))
-                    est_shift = np.array([station_shifts[s]['lag_seconds'] for s in stations], dtype=float)
-                    calc_shift = np.array([calc_shifts[s] for s in stations], dtype=float)
-    
-                    fig_ec, ax_ec = plt.subplots(1, 1, figsize=(6.2, 5.2))
-                    set_figure_title(fig_ec, f"{eve_id} {plot_comp} est vs calc shifts")
-                    ax_ec.scatter(calc_shift, est_shift, s=20, alpha=0.6)
-    
-                    minv = float(min(np.min(calc_shift), np.min(est_shift)))
-                    maxv = float(max(np.max(calc_shift), np.max(est_shift)))
-                    ax_ec.plot([minv, maxv], [minv, maxv], 'r--', lw=1.2, alpha=0.7, label='1:1 line')
-    
-                    ax_ec.set_xlabel('Calculated shift (s)')
-                    ax_ec.set_ylabel('Estimated shift (s)')
-                    ax_ec.set_title(f"Event {eve_id} {plot_comp}: Estimated vs Calculated shifts")
-                    ax_ec.grid(alpha=0.3)
-                    ax_ec.legend(loc='upper left', fontsize=9)
-                    plt.tight_layout()
-    
-                    estcalc_file = save_dir / f"{eve_id}_{plot_comp}_est_vs_calc_shift_{align_phase}.png"
-                    fig_ec.savefig(estcalc_file, dpi=300, bbox_inches='tight')
-                    print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
+                plot_estimated_vs_calculated_shifts(
+                    calc_shifts=calc_shifts,
+                    station_shifts=station_shifts,
+                    eve_id=eve_id,
+                    plot_comp=plot_comp,
+                    align_phase_name=align_phase,
+                    save_dir=save_dir,
+                )
     
                 # ===================== Snippet comparison plot (pass vs fail) =====================
                 try:
