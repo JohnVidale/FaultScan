@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import cast
 from matplotlib.lines import Line2D
 from pathlib import Path
 from datetime import timezone
@@ -290,9 +291,9 @@ def plot_three_component_log_envelope(
             z = stack_by_comp["DPZ"]
             r = stack_by_comp["R"]
             t = stack_by_comp["T"]
-            env_z = np.abs(hilbert(z))
-            env_r = np.abs(hilbert(r))
-            env_t = np.abs(hilbert(t))
+            env_z = np.abs(cast(np.ndarray, hilbert(z)))
+            env_r = np.abs(cast(np.ndarray, hilbert(r)))
+            env_t = np.abs(cast(np.ndarray, hilbert(t)))
             env_rms = np.sqrt((env_z ** 2 + env_r ** 2 + env_t ** 2) / 3.0)
             std_sec = 1.0
             std_samples = max(1.0, float(sample_rate_env) * std_sec)
@@ -349,7 +350,7 @@ def plot_single_trace_log_envelope(
     if num_traces != 1:
         return
     try:
-        env = np.abs(hilbert(stack_vec))
+        env = np.abs(cast(np.ndarray, hilbert(stack_vec)))
         std_sec = 1.0
         std_samples = max(1.0, float(sample_rate) * std_sec)
         win_samples = max(3, int(round(6.0 * std_samples)))
@@ -1615,7 +1616,7 @@ def prepare_reference_and_phase_timing(
 ):
     """Select reference trace, print summary, and compute phase timing for alignment."""
     ref_station_id, ref_trace = select_reference_trace(st_comp, name2ll)
-    if ref_trace is None:
+    if ref_trace is None or ref_station_id is None:
         return None
 
     print_reference_summary(ref_station_id, ref_trace, raw_limits_by_station)
