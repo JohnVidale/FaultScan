@@ -247,6 +247,10 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             return_value=(1.0, 2.0),
         ), patch.object(
             self.mod,
+            "plot_stage_stacks",
+            return_value=None,
+        ) as mock_plot_stage, patch.object(
+            self.mod,
             "plot_record_section_and_stack",
             return_value="FIG",
         ), patch.object(
@@ -296,6 +300,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             self.mod.run_pipeline()
 
         self.assertEqual(mock_store.call_count, 3)
+        mock_plot_stage.assert_not_called()
         mock_setup.assert_called_once()
         mock_persist.assert_called_once()
         mock_summary.assert_called_once()
@@ -383,6 +388,10 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             return_value=(1.0, 2.0),
         ), patch.object(
             self.mod,
+            "plot_stage_stacks",
+            return_value=None,
+        ) as mock_plot_stage, patch.object(
+            self.mod,
             "plot_record_section_and_stack",
             return_value="FIG",
         ), patch.object(
@@ -428,6 +437,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             self.mod.run_pipeline()
 
         self.assertEqual(mock_store.call_count, 3)
+        mock_plot_stage.assert_not_called()
         mock_setup.assert_not_called()
         mock_persist.assert_not_called()
         mock_summary.assert_not_called()
