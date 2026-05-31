@@ -19,6 +19,7 @@ from align_utils import (
     add_utc_time_axis,
     build_component_output_payload,
     compute_phase_travel_times,
+    compute_stage1_aligned_stack,
     compute_lag,
     correlation_time_bounds,
     draw_correlation_markers,
@@ -320,34 +321,17 @@ def compute_alignment_products(
         add_stage_timing(timing_state, "taup_station_shifts", _taup_wall_start, _taup_cpu_start)
 
     # ===================== Stage 1: align to reference -> aligned_stack =====================
-    aligned_stack = np.zeros(npts)
-    _stage1_wall_start = time.perf_counter()
-    _stage1_cpu_start = time.process_time()
-    for tr in st_comp:
-        d = tr.data[:npts]
-        lag0 = 0
-        rolled = shift_left_zeropad(d, lag0)
-
-        # Stage-1 alignment: include TauP expected shift + correlation correction
-        station_id = str(tr.stats.station)
-        if station_id in calc_shifts:
-            expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
-            rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
-            lag1 = expected_shift_samples + compute_lag(
-                ref, rolled_expected, win_start, win_end, move_limit_samples
-            )
-        else:
-            lag1 = lag0 + compute_lag(
-                ref, rolled, win_start, win_end, move_limit_samples
-            )
-
-        aligned_stack += shift_left_zeropad(d, lag1)
-    add_stage_timing(timing_state, "align_stage1", _stage1_wall_start, _stage1_cpu_start)
-
-    win = aligned_stack[win_start:win_end]
-    mx = np.max(np.abs(win)) if win.size > 0 else 0.0
-    if mx > 0:
-        aligned_stack = aligned_stack / mx
+    aligned_stack = compute_stage1_aligned_stack(
+        st_comp=st_comp,
+        ref=ref,
+        npts=npts,
+        sample_rate=sample_rate,
+        win_start=win_start,
+        win_end=win_end,
+        move_limit_samples=move_limit_samples,
+        calc_shifts=calc_shifts,
+        timing_state=timing_state,
+    )
 
     # ===================== Stage 2: align to aligned_stack -> select traces =====================
     selected_aligned_stack = np.zeros(npts)
