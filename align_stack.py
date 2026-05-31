@@ -529,6 +529,124 @@ def plot_station_pass_map(
         print(f"[WARN] Failed to create station pass/fail maps: {e}")
 
 
+def plot_individual_seismograms_single_component(
+    show_individual_seismograms: bool,
+    selected_rows: list,
+    rejected_rows: list,
+    pass_window_ids: set,
+    t_abs: np.ndarray,
+    mask: np.ndarray,
+    stack_vec: np.ndarray,
+    start_time: float,
+    win_start: int,
+    win_end: int,
+    sample_rate: float,
+    move_limit_sec: float,
+    npts: int,
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    save_dir: Path,
+) -> None:
+    """Plot individual seismograms in paged panels for single-component mode."""
+    if not show_individual_seismograms:
+        return
+    try:
+        all_rows = selected_rows + rejected_rows
+        all_rows.sort(key=lambda t: int(t[1]))
+
+        n_traces = len(all_rows)
+        if n_traces <= 0:
+            return
+
+        n_per = 20
+        panels_per_fig = 5
+        n_panels = int(np.ceil(n_traces / n_per))
+        n_figs = int(np.ceil(n_panels / panels_per_fig))
+
+        for fig_idx in range(n_figs):
+            panel_start = fig_idx * panels_per_fig
+            panel_end = min((fig_idx + 1) * panels_per_fig, n_panels)
+            panels_in_fig = panel_end - panel_start
+
+            fig_ind, axes_ind = plt.subplots(
+                panels_in_fig,
+                1,
+                figsize=(10, 2.2 * panels_in_fig),
+                sharex=True,
+                sharey=False,
+            )
+            set_figure_title(
+                fig_ind,
+                f"{eve_id} {plot_comp} individual seismograms fig {fig_idx + 1}",
+            )
+            if panels_in_fig == 1:
+                axes_ind = [axes_ind]
+
+            for p in range(panels_in_fig):
+                axp = axes_ind[p]
+                global_panel = panel_start + p
+                start_idx = global_panel * n_per
+                end_idx = min((global_panel + 1) * n_per, n_traces)
+                subset = all_rows[start_idx:end_idx]
+
+                t_win_start = start_time + (win_start / sample_rate)
+                t_win_end = start_time + (win_end / sample_rate)
+                t_explore_start = max(start_time, t_win_start - move_limit_sec)
+                t_explore_end = min(start_time + (npts / sample_rate), t_win_end + move_limit_sec)
+                axp.axvline(x=t_win_start, color="y", lw=1.2, alpha=0.9)
+                axp.axvline(x=t_win_end, color="y", lw=1.2, alpha=0.9)
+                axp.axvline(x=t_explore_start, color="g", lw=1.2, alpha=0.9)
+                axp.axvline(x=t_explore_end, color="g", lw=1.2, alpha=0.9)
+
+                for idx_in_subset, (_, station_id, y) in enumerate(subset):
+                    i = (len(subset) - 1) - idx_in_subset
+                    passed_win = station_id in pass_window_ids
+                    trace_color = "k" if passed_win else "red"
+                    axp.plot(
+                        t_abs[mask],
+                        y[mask] + i,
+                        color=trace_color,
+                        lw=0.7,
+                    )
+                    axp.text(
+                        t_abs[mask][0],
+                        i,
+                        station_id,
+                        fontsize=6,
+                        va="center",
+                    )
+
+                ref_offset = len(subset) + 1
+                axp.plot(
+                    t_abs[mask],
+                    stack_vec[mask] + ref_offset,
+                    color="C3",
+                    lw=1.2,
+                )
+
+                axp.set_ylim(-1, len(subset) + 2)
+                axp.grid(alpha=0.2)
+                axp.set_ylabel("Trace index")
+
+            axes_ind[-1].set_xlabel("Time since origin (s)")
+            fig_ind.suptitle(
+                f"Event {eve_id} {plot_comp}: individual seismograms "
+                f"(20 per panel, fig {fig_idx + 1}/{n_figs})",
+                fontsize=12,
+                fontweight="bold",
+            )
+            plt.tight_layout()
+
+            ind_file = save_dir / (
+                f"{eve_id}_{plot_comp}_individual_seismograms_{align_phase_name}_fig{fig_idx + 1}.png"
+            )
+            fig_ind.savefig(ind_file, dpi=300, bbox_inches="tight")
+            print(f"✓ Individual seismograms plot saved to: {ind_file}")
+    except Exception as e:
+        print(f"[WARN] Failed to create individual seismograms plot: {e}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -923,101 +1041,25 @@ def run_pipeline() -> None:
                 )
     
                 # ===================== Individual seismograms (20 traces per subplot, 5 panels per figure) =====================
-                if show_individual_seismograms:
-                    try:
-                        all_rows = selected_rows + rejected_rows
-                        all_rows.sort(key=lambda t: int(t[1]))
-    
-                        n_traces = len(all_rows)
-                        if n_traces > 0:
-                            n_per = 20
-                            panels_per_fig = 5
-                            n_panels = int(np.ceil(n_traces / n_per))
-                            n_figs = int(np.ceil(n_panels / panels_per_fig))
-    
-                            for fig_idx in range(n_figs):
-                                panel_start = fig_idx * panels_per_fig
-                                panel_end = min((fig_idx + 1) * panels_per_fig, n_panels)
-                                panels_in_fig = panel_end - panel_start
-    
-                                fig_ind, axes_ind = plt.subplots(
-                                    panels_in_fig,
-                                    1,
-                                    figsize=(10, 2.2 * panels_in_fig),
-                                    sharex=True,
-                                    sharey=False,
-                                )
-                                set_figure_title(
-                                    fig_ind,
-                                    f"{eve_id} {plot_comp} individual seismograms fig {fig_idx + 1}",
-                                )
-                                if panels_in_fig == 1:
-                                    axes_ind = [axes_ind]
-    
-                                for p in range(panels_in_fig):
-                                    axp = axes_ind[p]
-                                    global_panel = panel_start + p
-                                    start_idx = global_panel * n_per
-                                    end_idx = min((global_panel + 1) * n_per, n_traces)
-                                    subset = all_rows[start_idx:end_idx]
-    
-                                    # Thresholding windows
-                                    t_win_start = start_time + (win_start / sample_rate)
-                                    t_win_end = start_time + (win_end / sample_rate)
-                                    t_explore_start = max(start_time, t_win_start - move_limit_sec)
-                                    t_explore_end = min(start_time + (npts / sample_rate), t_win_end + move_limit_sec)
-                                    axp.axvline(x=t_win_start, color='y', lw=1.2, alpha=0.9)
-                                    axp.axvline(x=t_win_end, color='y', lw=1.2, alpha=0.9)
-                                    axp.axvline(x=t_explore_start, color='g', lw=1.2, alpha=0.9)
-                                    axp.axvline(x=t_explore_end, color='g', lw=1.2, alpha=0.9)
-    
-                                    for idx_in_subset, (_, station_id, y) in enumerate(subset):
-                                        i = (len(subset) - 1) - idx_in_subset
-                                        passed_win = station_id in pass_window_ids
-                                        trace_color = 'k' if passed_win else 'red'
-                                        axp.plot(
-                                            t_abs[mask],
-                                            y[mask] + i,
-                                            color=trace_color,
-                                            lw=0.7,
-                                        )
-                                        axp.text(
-                                            t_abs[mask][0],
-                                            i,
-                                            station_id,
-                                            fontsize=6,
-                                            va='center',
-                                        )
-    
-                                    # Reference stack above traces
-                                    ref_offset = len(subset) + 1
-                                    axp.plot(
-                                        t_abs[mask],
-                                        stack_vec[mask] + ref_offset,
-                                        color='C3',
-                                        lw=1.2,
-                                    )
-    
-                                    axp.set_ylim(-1, len(subset) + 2)
-                                    axp.grid(alpha=0.2)
-                                    axp.set_ylabel('Trace index')
-    
-                                axes_ind[-1].set_xlabel('Time since origin (s)')
-                                fig_ind.suptitle(
-                                    f"Event {eve_id} {plot_comp}: individual seismograms "
-                                    f"(20 per panel, fig {fig_idx + 1}/{n_figs})",
-                                    fontsize=12,
-                                    fontweight='bold',
-                                )
-                                plt.tight_layout()
-    
-                                ind_file = save_dir / (
-                                    f"{eve_id}_{plot_comp}_individual_seismograms_{align_phase}_fig{fig_idx + 1}.png"
-                                )
-                                fig_ind.savefig(ind_file, dpi=300, bbox_inches='tight')
-                                print(f"✓ Individual seismograms plot saved to: {ind_file}")
-                    except Exception as e:
-                        print(f"[WARN] Failed to create individual seismograms plot: {e}")
+                plot_individual_seismograms_single_component(
+                    show_individual_seismograms=show_individual_seismograms,
+                    selected_rows=selected_rows,
+                    rejected_rows=rejected_rows,
+                    pass_window_ids=pass_window_ids,
+                    t_abs=t_abs,
+                    mask=mask,
+                    stack_vec=stack_vec,
+                    start_time=start_time,
+                    win_start=win_start,
+                    win_end=win_end,
+                    sample_rate=sample_rate,
+                    move_limit_sec=move_limit_sec,
+                    npts=npts,
+                    eve_id=eve_id,
+                    plot_comp=plot_comp,
+                    align_phase_name=align_phase,
+                    save_dir=save_dir,
+                )
     
                 # ===================== Station maps: pass each threshold and both =====================
                 plot_station_pass_map(
