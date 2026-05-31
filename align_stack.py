@@ -918,6 +918,166 @@ def plot_three_component_station_pass_map(
         print(f"[WARN] Failed to create station pass/fail map (3 components): {e}")
 
 
+def plot_three_component_shift_comparison(
+    all_component_data: dict,
+    eve_id: str,
+    align_phase_name: str,
+    start_time: float,
+    end_time: float,
+    win_pre: float,
+    win_post: float,
+    move_limit_sec: float,
+    min_freq: float,
+    max_freq: float,
+    save_dir: Path,
+) -> None:
+    """Plot radial/transverse residual shift and correlation comparison panels."""
+    if "R" not in all_component_data or "T" not in all_component_data:
+        return
+
+    print("Creating shift comparison plot (Radial vs Transverse)...")
+    print(
+        "Shift comparison parameters: "
+        f"align_phase={align_phase_name}, start_time={start_time}, end_time={end_time}, "
+        f"win_pre={win_pre}, win_post={win_post}, "
+        f"move_limit_sec={move_limit_sec}"
+    )
+
+    r_shifts = all_component_data["R"]["station_shifts"]
+    t_shifts = all_component_data["T"]["station_shifts"]
+    r_corr = all_component_data["R"]["station_corr"]
+    t_corr = all_component_data["T"]["station_corr"]
+    r_calc = all_component_data["R"].get("calc_shifts", {})
+    t_calc = all_component_data["T"].get("calc_shifts", {})
+
+    common_stations = set(r_shifts.keys()) & set(t_shifts.keys())
+    common_stations = common_stations & set(r_calc.keys()) & set(t_calc.keys())
+    common_corr_stations = set(r_corr.keys()) & set(t_corr.keys())
+
+    if len(common_stations) == 0:
+        print("Warning: No common stations found between R and T components")
+        return
+
+    stations = sorted(common_stations, key=lambda s: int(s))
+    r_lags = np.array([r_shifts[sta]["lag_seconds"] - r_calc[sta] for sta in stations], dtype=float)
+    t_lags = np.array([t_shifts[sta]["lag_seconds"] - t_calc[sta] for sta in stations], dtype=float)
+    station_nums = np.array([int(sta) for sta in stations], dtype=int)
+
+    pass_r = set(all_component_data["R"].get("pass_window_ids", []))
+    pass_t = set(all_component_data["T"].get("pass_window_ids", []))
+    pass_mask = np.array([(sta in pass_r) and (sta in pass_t) for sta in stations], dtype=bool)
+    fail_mask = ~pass_mask
+
+    fig_shift, axes = plt.subplots(2, 3, figsize=(18, 10))
+    set_figure_title(fig_shift, f"{eve_id} shift comparison")
+    (ax1, ax2, ax5), (ax3, ax4, ax6) = axes
+
+    ax1.scatter(r_lags[pass_mask], t_lags[pass_mask], alpha=0.6, s=20, color="k", label="Pass r_win")
+    if np.any(fail_mask):
+        ax1.scatter(r_lags[fail_mask], t_lags[fail_mask], alpha=0.8, s=24, color="red", label="Fail r_win")
+    ax1.plot(
+        [min(r_lags + t_lags), max(r_lags + t_lags)],
+        [min(r_lags + t_lags), max(r_lags + t_lags)],
+        "r--",
+        alpha=0.5,
+        label="1:1 line",
+    )
+    ax1.set_xlabel("Radial residual shift (s)", fontsize=11)
+    ax1.set_ylabel("Transverse residual shift (s)", fontsize=11)
+    ax1.set_title("Radial vs Transverse Residuals", fontsize=12, fontweight="bold")
+    ax1.axvline(-move_limit_sec, color="0.4", linestyle=":", linewidth=1.2)
+    ax1.axvline(move_limit_sec, color="0.4", linestyle=":", linewidth=1.2)
+    ax1.axhline(-move_limit_sec, color="0.4", linestyle=":", linewidth=1.2)
+    ax1.axhline(move_limit_sec, color="0.4", linestyle=":", linewidth=1.2)
+    ax1.grid(alpha=0.3)
+    ax1.legend()
+    ax1.set_aspect("equal", adjustable="box")
+
+    diff_lags = np.array(r_lags) - np.array(t_lags)
+    zero_diff_frac = float(np.mean(np.isclose(diff_lags, 0.0, atol=1e-12)))
+    ax2.hist(diff_lags, bins=30, alpha=0.7, edgecolor="black")
+    ax2.axvline(0, color="r", linestyle="--", linewidth=2, label="Zero difference")
+    ax2.axvline(np.median(diff_lags), color="g", linestyle="--", linewidth=2, label=f"Median = {np.median(diff_lags):.3f}s")
+    ax2.set_xlabel("R residual - T residual (s)", fontsize=11)
+    ax2.set_ylabel("Count", fontsize=11)
+    ax2.set_title("Residual Difference Distribution", fontsize=12, fontweight="bold")
+    ax2.legend()
+    ax2.grid(alpha=0.3)
+
+    if len(common_corr_stations) > 0:
+        corr_stations = sorted(common_corr_stations, key=lambda s: int(s))
+        r_corr_vals = np.array([r_corr[sta] for sta in corr_stations], dtype=float)
+        t_corr_vals = np.array([t_corr[sta] for sta in corr_stations], dtype=float)
+        pass_mask_corr = np.array([(sta in pass_r) and (sta in pass_t) for sta in corr_stations], dtype=bool)
+        fail_mask_corr = ~pass_mask_corr
+        ax5.scatter(r_corr_vals[pass_mask_corr], t_corr_vals[pass_mask_corr], alpha=0.6, s=20, color="k", label="Pass r_win")
+        if np.any(fail_mask_corr):
+            ax5.scatter(r_corr_vals[fail_mask_corr], t_corr_vals[fail_mask_corr], alpha=0.8, s=24, color="red", label="Fail r_win")
+        ax5.plot([0, 1], [0, 1], "r--", alpha=0.5, label="1:1 line")
+        ax5.set_xlabel("Radial max corr", fontsize=11)
+        ax5.set_ylabel("Transverse max corr", fontsize=11)
+        ax5.set_title("Max Correlation: R vs T", fontsize=12, fontweight="bold")
+        ax5.grid(alpha=0.3)
+        ax5.legend()
+        ax5.set_aspect("equal", adjustable="box")
+    else:
+        ax5.text(0.5, 0.5, "No common corr stations", ha="center", va="center")
+        ax5.set_axis_off()
+
+    ax3.plot(station_nums, r_lags, "o-", label="Radial", alpha=0.5, markersize=4, color="0.4")
+    ax3.plot(station_nums, t_lags, "s-", label="Transverse", alpha=0.5, markersize=4, color="0.4")
+    if np.any(fail_mask):
+        ax3.scatter(station_nums[fail_mask], r_lags[fail_mask], color="red", s=24, marker="o", label="Fail r_win")
+        ax3.scatter(station_nums[fail_mask], t_lags[fail_mask], color="red", s=24, marker="s")
+    ax3.set_xlabel("Station number", fontsize=11)
+    ax3.set_ylabel("Residual shift (s)", fontsize=11)
+    ax3.set_title("Residuals vs Station", fontsize=12, fontweight="bold")
+    ax3.legend()
+    ax3.grid(alpha=0.3)
+
+    ax4.axis("off")
+    stats_text = f"""Shift Comparison Statistics
+
+Number of stations: {len(common_stations)}
+Radial shifts:
+Mean: {np.mean(r_lags):.4f} s
+Std: {np.std(r_lags):.4f} s
+Range: [{np.min(r_lags):.4f}, {np.max(r_lags):.4f}] s
+
+Transverse shifts:
+Mean: {np.mean(t_lags):.4f} s
+Std: {np.std(t_lags):.4f} s
+Range: [{np.min(t_lags):.4f}, {np.max(t_lags):.4f}] s
+
+Difference (R - T):
+    Mean: {np.mean(diff_lags):.4f} s
+    Median: {np.median(diff_lags):.4f} s
+    Std: {np.std(diff_lags):.4f} s
+    Zero-difference fraction: {zero_diff_frac*100:.1f}%
+
+Frequency content (bandpass):
+    {min_freq:.2f}-{max_freq:.2f} Hz"""
+    stats_text += (
+        f"\n\nParameters:\n"
+        f"  align_phase: {align_phase_name}\n"
+        f"  start_time: {start_time}\n"
+        f"  end_time: {end_time}\n"
+        f"  win_pre: {win_pre}\n"
+        f"  win_post: {win_post}\n"
+        f"  move_limit_sec: {move_limit_sec}"
+    )
+    ax4.text(0.1, 0.5, stats_text, fontsize=10, family="monospace", verticalalignment="center")
+
+    ax6.axis("off")
+
+    fig_shift.suptitle(f"Event {eve_id} - Shift & Correlation Comparison", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+
+    shift_file = save_dir / f"{eve_id}_shift_comparison_{align_phase_name}.png"
+    fig_shift.savefig(shift_file, dpi=300, bbox_inches="tight")
+    print(f"✓ Shift comparison plot saved to: {shift_file}")
+
+
 def compute_alignment_products(
     st_comp: Stream,
     ref_trace: Trace,
@@ -1576,158 +1736,19 @@ def run_pipeline() -> None:
         )
     
         # ===================== Shift comparison plot: Radial vs Transverse =====================
-        if 'R' in all_component_data and 'T' in all_component_data:
-            print("Creating shift comparison plot (Radial vs Transverse)...")
-            print(
-                "Shift comparison parameters: "
-                f"align_phase={align_phase}, start_time={start_time}, end_time={end_time}, "
-                f"win_pre={win_pre}, win_post={win_post}, "
-                f"move_limit_sec={move_limit_sec}"
-            )
-            
-            r_shifts = all_component_data['R']['station_shifts']
-            t_shifts = all_component_data['T']['station_shifts']
-            r_corr = all_component_data['R']['station_corr']
-            t_corr = all_component_data['T']['station_corr']
-            r_calc = all_component_data['R'].get('calc_shifts', {})
-            t_calc = all_component_data['T'].get('calc_shifts', {})
-            
-            # Find common stations (require predicted shifts for residual plotting)
-            common_stations = set(r_shifts.keys()) & set(t_shifts.keys())
-            common_stations = common_stations & set(r_calc.keys()) & set(t_calc.keys())
-            common_corr_stations = set(r_corr.keys()) & set(t_corr.keys())
-    
-            if len(common_stations) > 0:
-                # Extract shifts in seconds (remove predicted shift per station)
-                stations = sorted(common_stations, key=lambda s: int(s))
-                r_lags = np.array([r_shifts[sta]['lag_seconds'] - r_calc[sta] for sta in stations], dtype=float)
-                t_lags = np.array([t_shifts[sta]['lag_seconds'] - t_calc[sta] for sta in stations], dtype=float)
-                station_nums = np.array([int(sta) for sta in stations], dtype=int)
-    
-                pass_r = set(all_component_data['R'].get('pass_window_ids', []))
-                pass_t = set(all_component_data['T'].get('pass_window_ids', []))
-                pass_mask = np.array([(sta in pass_r) and (sta in pass_t) for sta in stations], dtype=bool)
-                fail_mask = ~pass_mask
-                    
-                # Create comparison figure
-                fig_shift, axes = plt.subplots(2, 3, figsize=(18, 10))
-                set_figure_title(fig_shift, f"{eve_id} shift comparison")
-                (ax1, ax2, ax5), (ax3, ax4, ax6) = axes
-    
-                # Panel 1: Scatter plot R vs T (residuals after predicted shift removal)
-                ax1.scatter(r_lags[pass_mask], t_lags[pass_mask], alpha=0.6, s=20, color='k', label='Pass r_win')
-                if np.any(fail_mask):
-                    ax1.scatter(r_lags[fail_mask], t_lags[fail_mask], alpha=0.8, s=24, color='red', label='Fail r_win')
-                ax1.plot([min(r_lags + t_lags), max(r_lags + t_lags)],
-                        [min(r_lags + t_lags), max(r_lags + t_lags)],
-                        'r--', alpha=0.5, label='1:1 line')
-                ax1.set_xlabel('Radial residual shift (s)', fontsize=11)
-                ax1.set_ylabel('Transverse residual shift (s)', fontsize=11)
-                ax1.set_title('Radial vs Transverse Residuals', fontsize=12, fontweight='bold')
-                ax1.axvline(-move_limit_sec, color='0.4', linestyle=':', linewidth=1.2)
-                ax1.axvline(move_limit_sec, color='0.4', linestyle=':', linewidth=1.2)
-                ax1.axhline(-move_limit_sec, color='0.4', linestyle=':', linewidth=1.2)
-                ax1.axhline(move_limit_sec, color='0.4', linestyle=':', linewidth=1.2)
-                ax1.grid(alpha=0.3)
-                ax1.legend()
-                ax1.set_aspect('equal', adjustable='box')
-                    
-                # Panel 2: Difference histogram (residuals)
-                diff_lags = np.array(r_lags) - np.array(t_lags)
-                # Fraction of stations with zero R–T shift difference
-                # (shifts are derived from integer-sample lags; use tiny atol for float safety)
-                zero_diff_frac = float(np.mean(np.isclose(diff_lags, 0.0, atol=1e-12)))
-                ax2.hist(diff_lags, bins=30, alpha=0.7, edgecolor='black')
-                ax2.axvline(0, color='r', linestyle='--', linewidth=2, label='Zero difference')
-                ax2.axvline(np.median(diff_lags), color='g', linestyle='--', linewidth=2,
-                            label=f'Median = {np.median(diff_lags):.3f}s')
-                ax2.set_xlabel('R residual - T residual (s)', fontsize=11)
-                ax2.set_ylabel('Count', fontsize=11)
-                ax2.set_title('Residual Difference Distribution', fontsize=12, fontweight='bold')
-                ax2.legend()
-                ax2.grid(alpha=0.3)
-    
-                # Panel 3: Max correlation R vs T
-                if len(common_corr_stations) > 0:
-                    corr_stations = sorted(common_corr_stations, key=lambda s: int(s))
-                    r_corr_vals = np.array([r_corr[sta] for sta in corr_stations], dtype=float)
-                    t_corr_vals = np.array([t_corr[sta] for sta in corr_stations], dtype=float)
-                    pass_mask_corr = np.array([(sta in pass_r) and (sta in pass_t) for sta in corr_stations], dtype=bool)
-                    fail_mask_corr = ~pass_mask_corr
-                    ax5.scatter(r_corr_vals[pass_mask_corr], t_corr_vals[pass_mask_corr], alpha=0.6, s=20, color='k', label='Pass r_win')
-                    if np.any(fail_mask_corr):
-                        ax5.scatter(r_corr_vals[fail_mask_corr], t_corr_vals[fail_mask_corr], alpha=0.8, s=24, color='red', label='Fail r_win')
-                    ax5.plot([0, 1], [0, 1], 'r--', alpha=0.5, label='1:1 line')
-                    ax5.set_xlabel('Radial max corr', fontsize=11)
-                    ax5.set_ylabel('Transverse max corr', fontsize=11)
-                    ax5.set_title('Max Correlation: R vs T', fontsize=12, fontweight='bold')
-                    ax5.grid(alpha=0.3)
-                    ax5.legend()
-                    ax5.set_aspect('equal', adjustable='box')
-                else:
-                    ax5.text(0.5, 0.5, 'No common corr stations', ha='center', va='center')
-                    ax5.set_axis_off()
-                
-                # Panel 3: Residual shifts vs station number
-                ax3.plot(station_nums, r_lags, 'o-', label='Radial', alpha=0.5, markersize=4, color='0.4')
-                ax3.plot(station_nums, t_lags, 's-', label='Transverse', alpha=0.5, markersize=4, color='0.4')
-                if np.any(fail_mask):
-                    ax3.scatter(station_nums[fail_mask], r_lags[fail_mask], color='red', s=24, marker='o', label='Fail r_win')
-                    ax3.scatter(station_nums[fail_mask], t_lags[fail_mask], color='red', s=24, marker='s')
-                ax3.set_xlabel('Station number', fontsize=11)
-                ax3.set_ylabel('Residual shift (s)', fontsize=11)
-                ax3.set_title('Residuals vs Station', fontsize=12, fontweight='bold')
-                ax3.legend()
-                ax3.grid(alpha=0.3)
-                
-                # Panel 4: Statistics
-                ax4.axis('off')
-                stats_text = f"""Shift Comparison Statistics
-                    
-        Number of stations: {len(common_stations)}
-        Radial shifts:
-        Mean: {np.mean(r_lags):.4f} s
-        Std: {np.std(r_lags):.4f} s
-        Range: [{np.min(r_lags):.4f}, {np.max(r_lags):.4f}] s
-    
-        Transverse shifts:
-        Mean: {np.mean(t_lags):.4f} s
-        Std: {np.std(t_lags):.4f} s
-        Range: [{np.min(t_lags):.4f}, {np.max(t_lags):.4f}] s
-    
-        Difference (R - T):
-            Mean: {np.mean(diff_lags):.4f} s
-            Median: {np.median(diff_lags):.4f} s
-            Std: {np.std(diff_lags):.4f} s
-            Zero-difference fraction: {zero_diff_frac*100:.1f}%
-        
-        Frequency content (bandpass):
-            {min_freq:.2f}–{max_freq:.2f} Hz"""
-                stats_text += (
-                    f"\n\nParameters:\n"
-                    f"  align_phase: {align_phase}\n"
-                    f"  start_time: {start_time}\n"
-                    f"  end_time: {end_time}\n"
-                    f"  win_pre: {win_pre}\n"
-                    f"  win_post: {win_post}\n"
-                    f"  move_limit_sec: {move_limit_sec}"
-                )
-                ax4.text(0.1, 0.5, stats_text, fontsize=10, family='monospace',
-                        verticalalignment='center')
-    
-                # Panel 6: leave blank
-                ax6.axis('off')
-                
-                fig_shift.suptitle(f'Event {eve_id} - Shift & Correlation Comparison',
-                                fontsize=14, fontweight='bold')
-                plt.tight_layout()
-                
-                # Save shift comparison plot
-                shift_file = save_dir / f"{eve_id}_shift_comparison_{align_phase}.png"
-                fig_shift.savefig(shift_file, dpi=300, bbox_inches='tight')
-                print(f"✓ Shift comparison plot saved to: {shift_file}")
-            else:
-                print("Warning: No common stations found between R and T components")
+        plot_three_component_shift_comparison(
+            all_component_data=all_component_data,
+            eve_id=eve_id,
+            align_phase_name=align_phase,
+            start_time=start_time,
+            end_time=end_time,
+            win_pre=win_pre,
+            win_post=win_post,
+            move_limit_sec=move_limit_sec,
+            min_freq=min_freq,
+            max_freq=max_freq,
+            save_dir=save_dir,
+        )
     
         # ===================== Estimated vs calculated shift plot (3 components) =====================
         print("Creating estimated vs calculated shift plot (3 components)...")
