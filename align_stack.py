@@ -2336,30 +2336,6 @@ def run_three_component_combined_outputs(
     )
 
 
-def maybe_run_three_component_combined_outputs(
-    process_as_three_comp: bool,
-    all_component_data: dict,
-    show_record_section_plot: bool,
-    eve_id: str,
-    align_phase: str,
-    save_dir: Path,
-    catalog_df,
-    pass_window_ids: set,
-) -> None:
-    """Run combined three-component outputs only when full component data exists."""
-    if not (process_as_three_comp and len(all_component_data) == 3):
-        return
-
-    run_three_component_combined_outputs(
-        all_component_data=all_component_data,
-        show_record_section_plot=show_record_section_plot,
-        eve_id=eve_id,
-        align_phase=align_phase,
-        save_dir=save_dir,
-        catalog_df=catalog_df,
-        pass_window_ids=pass_window_ids,
-    )
-
 def run_pipeline() -> None:
     global align_phase, move_limit_sec, start_time, end_time
     save_dir = Path(path_prefix + "output")
@@ -2582,16 +2558,16 @@ def run_pipeline() -> None:
     
     
     # ===================== Three-component combined plotting =====================
-    maybe_run_three_component_combined_outputs(
-        process_as_three_comp=process_as_three_comp,
-        all_component_data=all_component_data,
-        show_record_section_plot=show_record_section_plot,
-        eve_id=eve_id,
-        align_phase=align_phase,
-        save_dir=save_dir,
-        catalog_df=catalog_local,
-        pass_window_ids=pass_window_ids,
-    )
+    if process_as_three_comp and len(all_component_data) == 3:
+        run_three_component_combined_outputs(
+            all_component_data=all_component_data,
+            show_record_section_plot=show_record_section_plot,
+            eve_id=eve_id,
+            align_phase=align_phase,
+            save_dir=save_dir,
+            catalog_df=catalog_local,
+            pass_window_ids=pass_window_ids,
+        )
 
 def main() -> None:
     run_pipeline()
