@@ -4,8 +4,9 @@ import matplotlib.pyplot as plt
 from typing import cast
 from matplotlib.lines import Line2D
 from pathlib import Path
-from datetime import timezone
+from datetime import datetime, timezone
 import time
+import json
 
 from obspy import UTCDateTime, Stream, Trace
 from obspy.geodetics import gps2dist_azimuth
@@ -78,6 +79,65 @@ events = [event]        # Allows for future modification to process multiple eve
 show_individual_seismograms = False  # Plot individual seismograms (20 traces/plot, 5 panels/figure)
 show_record_section_plot = False  # Show aligned record sections (single + 3-comp)
 
+INPUT_CONFIG_FILE = Path(__file__).resolve().with_name("rp_input.json")
+RUN_OUTPUT_DIR: Path | None = None
+
+
+def apply_input_config(config_file: Path) -> None:
+    """Load optional JSON run-parameter input file and override defaults."""
+    global min_freq, max_freq, start_time, end_time
+    global win_pre, win_post, r_window_min, move_limit_sec
+    global all_channels, component, align_phase, verbose
+    global path_prefix, info_root, sps_rate, data_path, event, events
+    global show_individual_seismograms, show_record_section_plot
+
+    if not config_file.exists():
+        print(f"[INFO] Input config not found, using in-file defaults: {config_file}")
+        return
+
+    try:
+        with config_file.open("r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception as e:
+        print(f"[WARN] Failed to read input config: {config_file} ({e})")
+        return
+
+    min_freq = float(cfg.get("min_freq", min_freq))
+    max_freq = float(cfg.get("max_freq", max_freq))
+    start_time = float(cfg.get("start_time", start_time))
+    end_time = float(cfg.get("end_time", end_time))
+    win_pre = float(cfg.get("win_pre", win_pre))
+    win_post = float(cfg.get("win_post", win_post))
+    r_window_min = float(cfg.get("r_window_min", r_window_min))
+    move_limit_sec = float(cfg.get("move_limit_sec", move_limit_sec))
+
+    all_channels = bool(cfg.get("all_channels", all_channels))
+    component = str(cfg.get("component", component))
+    align_phase = str(cfg.get("align_phase", align_phase))
+    verbose = bool(cfg.get("verbose", verbose))
+
+    path_prefix_cfg = str(cfg.get("path_prefix", path_prefix))
+    path_prefix = path_prefix_cfg if path_prefix_cfg.endswith("/") else (path_prefix_cfg + "/")
+    sps_rate = str(cfg.get("sps_rate", sps_rate))
+
+    if "events" in cfg and isinstance(cfg["events"], list):
+        events = [str(x) for x in cfg["events"]]
+    elif "event" in cfg:
+        events = [str(cfg["event"])]
+    if events:
+        event = events[0]
+
+    info_root = Path(cfg.get("info_root", path_prefix + "20220930_events_cut/event_sta_info"))
+    data_path = Path(cfg.get("data_path", path_prefix + "20220930_events_cut/20220930_" + sps_rate))
+
+    show_individual_seismograms = bool(cfg.get("show_individual_seismograms", show_individual_seismograms))
+    show_record_section_plot = bool(cfg.get("show_record_section_plot", show_record_section_plot))
+
+    print(f"Loaded input config: {config_file}")
+
+
+apply_input_config(INPUT_CONFIG_FILE)
+
 
 # Timing (cpu and wall)
 timing_state = TimingState()
@@ -96,6 +156,63 @@ except Exception as e:
 
 # Travel-time model
 model = TauPyModel(model="iasp91")
+
+
+def write_run_parameter_snapshot(output_root: Path) -> Path:
+    """Write a timestamped JSON snapshot of run parameters for reproducibility."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-2]
+    snapshot_dir = output_root / "run_parameters"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    snapshot = {
+        "timestamp": timestamp,
+        "min_freq": min_freq,
+        "max_freq": max_freq,
+        "start_time": start_time,
+        "end_time": end_time,
+        "win_pre": win_pre,
+        "win_post": win_post,
+        "r_window_min": r_window_min,
+        "move_limit_sec": move_limit_sec,
+        "all_channels": all_channels,
+        "component": component,
+        "align_phase": align_phase,
+        "verbose": verbose,
+        "path_prefix": path_prefix,
+        "info_root": str(info_root),
+        "sps_rate": sps_rate,
+        "data_path": str(data_path),
+        "events": list(events),
+        "show_individual_seismograms": show_individual_seismograms,
+        "show_record_section_plot": show_record_section_plot,
+    }
+
+    snapshot_path = snapshot_dir / f"rp_{timestamp}.json"
+    with snapshot_path.open("w", encoding="utf-8") as f:
+        json.dump(snapshot, f, indent=2)
+
+    print(f"Saved run parameter snapshot: {snapshot_path}")
+    return snapshot_path
+
+
+def initialize_run_output_dir(base_output_root: Path) -> Path:
+    """Create and return a timestamped directory for one pipeline run."""
+    global RUN_OUTPUT_DIR
+    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-2]
+    RUN_OUTPUT_DIR = base_output_root / run_timestamp
+    RUN_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Run output directory: {RUN_OUTPUT_DIR}")
+    return RUN_OUTPUT_DIR
+
+
+def get_run_event_output_dir(eve_id: str) -> Path:
+    """Return per-event output directory under the active run directory."""
+    if RUN_OUTPUT_DIR is None:
+        fallback_root = Path(path_prefix + "output")
+        initialize_run_output_dir(fallback_root)
+    event_dir = RUN_OUTPUT_DIR / eve_id  # type: ignore[union-attr]
+    event_dir.mkdir(parents=True, exist_ok=True)
+    return event_dir
 
 # ===================== Helper functions =====================
 
@@ -1652,7 +1769,7 @@ def load_event_context_and_waveforms(
 ):
     """Load event metadata/station lookup and read event waveforms for one channel."""
     event_depth, eve_lat, eve_lon, origin = load_event_metadata(eve_id, info_root)
-    save_dir = make_event_output_dir(path_prefix, eve_id)
+    save_dir = get_run_event_output_dir(eve_id)
     name2ll = load_station_lookup(info_root)
 
     st_window, raw_limits_by_station = read_waveforms_for_event(
@@ -1882,7 +1999,7 @@ def persist_three_component_outputs(
 ) -> Path:
     """Write 3-component stack mSEEDs and optional combined figure, returning output dir."""
     if all(comp in stack_by_comp for comp in comp_order):
-        save_dir = make_event_output_dir(path_prefix, eve_id)
+        save_dir = get_run_event_output_dir(eve_id)
         write_component_stack_mseeds(
             comp_order=comp_order,
             stack_by_comp=stack_by_comp,
@@ -1894,7 +2011,7 @@ def persist_three_component_outputs(
         )
 
     if show_record:
-        save_dir = make_event_output_dir(path_prefix, eve_id)
+        save_dir = get_run_event_output_dir(eve_id)
         finalize_three_component_record_figure(
             fig=fig,
             eve_id=eve_id,
@@ -2044,7 +2161,9 @@ def compute_alignment_products(
     )
 def run_pipeline() -> None:
     global align_phase, move_limit_sec, start_time, end_time
-    save_dir = Path(path_prefix + "output")
+    base_output_root = Path(path_prefix + "output")
+    save_dir = initialize_run_output_dir(base_output_root)
+    write_run_parameter_snapshot(save_dir)
     # User-facing components: Z, R, T
     channels, process_as_three_comp, sel_comp_list = get_component_selection(
         all_channels, component

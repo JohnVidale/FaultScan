@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from obspy import read, Stream
+from obspy import read, Stream, Trace
 from obspy.geodetics import gps2dist_azimuth
 from obspy.geodetics import degrees2kilometers, locations2degrees
 from obspy import UTCDateTime
