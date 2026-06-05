@@ -63,15 +63,15 @@ verbose     = False     # If True, print detailed processing info
 
 # Paths
 path_prefix = "/Users/jvidale/Documents/Research/FaultScanR/"
-info_root = Path(path_prefix + "20220930_events_cut/event_sta_info")
+info_root = Path(path_prefix + "event_sta_info")
 
 # sps_rate = "down50"  # Subdirectory name indicating the sampling rate of the data (e.g., "down50", "down100", etc.)
 # data_path = Path(path_prefix + "20220930_events_cut/07_1hour_20220930")
 
 sps_rate = "down100"
-data_path = Path(path_prefix + "20220930_events_cut/20220930_" + sps_rate)
+data_path = Path(path_prefix + "Sgrams/20220930_" + sps_rate)
 use_snippets_input = False
-snippets_root = Path(path_prefix + "Snippets")
+snippets_root = Path(path_prefix + "Sgrams/Snippets")
 
 event       = "CI_40353544" # Single run selection (used when the corresponding "all_*" is False)
 # event       = "CI_40353664" # Single run selection (used when the corresponding "all_*" is False)
@@ -130,10 +130,10 @@ def apply_input_config(config_file: Path) -> None:
     if events:
         event = events[0]
 
-    info_root = Path(cfg.get("info_root", path_prefix + "20220930_events_cut/event_sta_info"))
-    data_path = Path(cfg.get("data_path", path_prefix + "20220930_events_cut/20220930_" + sps_rate))
+    info_root = Path(cfg.get("info_root", path_prefix + "event_sta_info"))
+    data_path = Path(cfg.get("data_path", path_prefix + "Sgrams/20220930_" + sps_rate))
     use_snippets_input = bool(cfg.get("use_snippets_input", use_snippets_input))
-    snippets_root = Path(cfg.get("snippets_root", path_prefix + "Snippets"))
+    snippets_root = Path(cfg.get("snippets_root", path_prefix + "Sgrams/Snippets"))
 
     show_individual_seismograms = bool(cfg.get("show_individual_seismograms", show_individual_seismograms))
     show_record_section_plot = bool(cfg.get("show_record_section_plot", show_record_section_plot))
@@ -150,8 +150,8 @@ timing_state = TimingState()
 
 catalog_local = None
 try:
-    catalog_local_file = info_root / "catalog_20220930_allevents.csv"
-    catalog_local = pd.read_csv(catalog_local_file)
+    catalog_local_file = info_root / "catalog_local_hand.xlsx"
+    catalog_local = pd.read_excel(catalog_local_file)
     print(f"Loaded catalog: {catalog_local_file}")
 except Exception as e:
     print(f"[WARN] Failed to read catalog in {info_root} ({e})")
@@ -1676,7 +1676,13 @@ def finalize_single_component_plotting(plot_wall_start: float, plot_cpu_start: f
     """Record timing and show figures for single-component plotting mode."""
     add_stage_timing(timing_state, "plot_and_save", plot_wall_start, plot_cpu_start)
     report_timing_once(timing_state)
-    plt.show()
+    # In batch runs, non-blocking display avoids stopping at the first event.
+    if len(events) > 1:
+        plt.show(block=False)
+        plt.pause(0.001)
+        plt.close("all")
+    else:
+        plt.show()
 
 
 def start_plot_timing():
@@ -1691,7 +1697,13 @@ def finalize_three_component_plotting(plot_wall_start: float, plot_cpu_start: fl
     # plt.show()
     report_timing_once(timing_state)
     print("\a\a\a")
-    plt.show()
+    # In batch runs, non-blocking display avoids stopping at the first event.
+    if len(events) > 1:
+        plt.show(block=False)
+        plt.pause(0.001)
+        plt.close("all")
+    else:
+        plt.show()
 
 
 def print_three_component_banner() -> None:

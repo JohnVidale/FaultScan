@@ -221,8 +221,8 @@ def make_event_output_dir(base_prefix: str, eve_id: str) -> Path:
 
 def load_event_metadata(eve_id: str, info_dir: Path):
     """Load event row and return key metadata for one event id."""
-    catalog_file = info_dir / "catalog_20220930_allevents.csv"
-    eve_info = pd.read_csv(catalog_file)
+    catalog_file = info_dir / "catalog_local_hand.xlsx"
+    eve_info = pd.read_excel(catalog_file)
 
     rows = eve_info.loc[eve_info["evid"] == eve_id]
     if rows.empty:
