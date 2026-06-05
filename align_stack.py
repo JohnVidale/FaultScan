@@ -70,6 +70,8 @@ info_root = Path(path_prefix + "20220930_events_cut/event_sta_info")
 
 sps_rate = "down100"
 data_path = Path(path_prefix + "20220930_events_cut/20220930_" + sps_rate)
+use_snippets_input = False
+snippets_root = Path(path_prefix + "Snippets")
 
 event       = "CI_40353544" # Single run selection (used when the corresponding "all_*" is False)
 # event       = "CI_40353664" # Single run selection (used when the corresponding "all_*" is False)
@@ -89,6 +91,7 @@ def apply_input_config(config_file: Path) -> None:
     global win_pre, win_post, r_window_min, move_limit_sec
     global all_channels, component, align_phase, verbose
     global path_prefix, info_root, sps_rate, data_path, event, events
+    global use_snippets_input, snippets_root
     global show_individual_seismograms, show_record_section_plot
 
     if not config_file.exists():
@@ -129,6 +132,8 @@ def apply_input_config(config_file: Path) -> None:
 
     info_root = Path(cfg.get("info_root", path_prefix + "20220930_events_cut/event_sta_info"))
     data_path = Path(cfg.get("data_path", path_prefix + "20220930_events_cut/20220930_" + sps_rate))
+    use_snippets_input = bool(cfg.get("use_snippets_input", use_snippets_input))
+    snippets_root = Path(cfg.get("snippets_root", path_prefix + "Snippets"))
 
     show_individual_seismograms = bool(cfg.get("show_individual_seismograms", show_individual_seismograms))
     show_record_section_plot = bool(cfg.get("show_record_section_plot", show_record_section_plot))
@@ -143,26 +148,22 @@ apply_input_config(INPUT_CONFIG_FILE)
 timing_state = TimingState()
 
 
-catalog_local_file = info_root / "catalog_local_hand.xlsx"
 catalog_local = None
 try:
-    if catalog_local_file.exists():
-        catalog_local = pd.read_excel(catalog_local_file)
-        print(f"Loaded catalog: {catalog_local_file}")
-    else:
-        print(f"[WARN] Catalog not found: {catalog_local_file}")
+    catalog_local_file = info_root / "catalog_20220930_allevents.csv"
+    catalog_local = pd.read_csv(catalog_local_file)
+    print(f"Loaded catalog: {catalog_local_file}")
 except Exception as e:
-    print(f"[WARN] Failed to read catalog: {catalog_local_file} ({e})")
+    print(f"[WARN] Failed to read catalog in {info_root} ({e})")
 
 # Travel-time model
 model = TauPyModel(model="iasp91")
 
 
-def write_run_parameter_snapshot(output_root: Path) -> Path:
+def write_run_parameter_snapshot(output_dir: Path) -> Path:
     """Write a timestamped JSON snapshot of run parameters for reproducibility."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-2]
-    snapshot_dir = output_root / "run_parameters"
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     snapshot = {
         "timestamp": timestamp,
@@ -182,12 +183,14 @@ def write_run_parameter_snapshot(output_root: Path) -> Path:
         "info_root": str(info_root),
         "sps_rate": sps_rate,
         "data_path": str(data_path),
+        "use_snippets_input": use_snippets_input,
+        "snippets_root": str(snippets_root),
         "events": list(events),
         "show_individual_seismograms": show_individual_seismograms,
         "show_record_section_plot": show_record_section_plot,
     }
 
-    snapshot_path = snapshot_dir / f"rp_{timestamp}.json"
+    snapshot_path = output_dir / f"rp_{timestamp}.json"
     with snapshot_path.open("w", encoding="utf-8") as f:
         json.dump(snapshot, f, indent=2)
 
@@ -1696,6 +1699,15 @@ def print_three_component_banner() -> None:
     print(f"\n{'='*70}")
     print("Creating combined three-component plot...")
     print(f"{'='*70}\n")
+
+
+def get_event_data_path(eve_id: str) -> Path:
+    """Resolve waveform input root for one event."""
+    if use_snippets_input:
+        return snippets_root / eve_id
+    return data_path
+
+
 def select_component_stream(
     st_window: Stream,
     sel_comp: str,
@@ -1771,6 +1783,11 @@ def load_event_context_and_waveforms(
     event_depth, eve_lat, eve_lon, origin = load_event_metadata(eve_id, info_root)
     save_dir = get_run_event_output_dir(eve_id)
     name2ll = load_station_lookup(info_root)
+    event_data_path = get_event_data_path(eve_id)
+
+    if not event_data_path.exists():
+        print(f"[WARN] Waveform input path not found for event {eve_id}: {event_data_path}")
+        return None
 
     st_window, raw_limits_by_station = read_waveforms_for_event(
         eve_id=eve_id,
@@ -1782,7 +1799,7 @@ def load_event_context_and_waveforms(
         eve_lat=eve_lat,
         eve_lon=eve_lon,
         origin=origin,
-        data_path=data_path,
+        data_path=event_data_path,
         sps_rate=sps_rate,
         start_time=start_time,
         end_time=end_time,
@@ -2162,23 +2179,23 @@ def compute_alignment_products(
 def run_pipeline() -> None:
     global align_phase, move_limit_sec, start_time, end_time
     base_output_root = Path(path_prefix + "output")
-    save_dir = initialize_run_output_dir(base_output_root)
-    write_run_parameter_snapshot(save_dir)
+    initialize_run_output_dir(base_output_root)
+    snapshot_written_dirs: set[Path] = set()
     # User-facing components: Z, R, T
     channels, process_as_three_comp, sel_comp_list = get_component_selection(
         all_channels, component
     )
 
-    # Caches are harmless in single-component mode and simplify control flow.
-    all_component_data, horizontal_window_cache, horizontal_raw_limits_cache = {}, {}, {}
-    
-    for idx, channel in enumerate(channels):
-        sel_comp = sel_comp_list[idx]
-        
-        print(f"Processing channel: {channel}")
-    
-        for eve_id in events:
-            print(f"==========Processing event {eve_id}===========")
+    for eve_id in events:
+        print(f"==========Processing event {eve_id}===========")
+        # Reset per-event caches/payloads so each event gets its own 3-comp products.
+        all_component_data = {}
+        horizontal_window_cache, horizontal_raw_limits_cache = {}, {}
+        pass_window_ids_for_event: set = set()
+
+        for idx, channel in enumerate(channels):
+            sel_comp = sel_comp_list[idx]
+            print(f"Processing channel: {channel}")
 
             event_context = load_event_context_and_waveforms(
                 eve_id=eve_id,
@@ -2199,6 +2216,10 @@ def run_pipeline() -> None:
                 st_window,
                 raw_limits_by_station,
             ) = event_context
+
+            if save_dir not in snapshot_written_dirs:
+                write_run_parameter_snapshot(save_dir)
+                snapshot_written_dirs.add(save_dir)
     
             stream_ref_context = prepare_stream_reference_context(
                 st_window=st_window,
@@ -2266,6 +2287,7 @@ def run_pipeline() -> None:
                 align_phase_name=align_phase,
                 t_ref=t_ref,
             )
+            pass_window_ids_for_event = pass_window_ids
 
             _plot_wall_start, _plot_cpu_start = start_plot_timing()
             if not all_channels:
@@ -2367,75 +2389,75 @@ def run_pipeline() -> None:
                 )
                 finalize_single_component_plotting(_plot_wall_start, _plot_cpu_start)
 
-    # Three-component combined plotting
-    if process_as_three_comp and len(all_component_data) == 3:
-        _plot3_wall_start, _plot3_cpu_start = start_plot_timing()
-        print_three_component_banner()
+        # Three-component combined plotting for this event
+        if process_as_three_comp and len(all_component_data) == 3:
+            _plot3_wall_start, _plot3_cpu_start = start_plot_timing()
+            print_three_component_banner()
 
-        fig, gs = setup_three_component_record_figure(
-            show_record=show_record_section_plot,
-            eve_id=eve_id,
-            align_phase_name=align_phase,
-        )
+            fig, gs = setup_three_component_record_figure(
+                show_record=show_record_section_plot,
+                eve_id=eve_id,
+                align_phase_name=align_phase,
+            )
 
-        (
-            comp_order,
-            comp_titles,
-            eve_id,
-            align_phase,
-            start_time,
-            end_time,
-            t_abs,
-            mask,
-            sample_rate_env,
-            origin_env,
-        ) = get_three_component_plot_context(all_component_data)
+            (
+                comp_order,
+                comp_titles,
+                eve_id,
+                align_phase,
+                start_time,
+                end_time,
+                t_abs,
+                mask,
+                sample_rate_env,
+                origin_env,
+            ) = get_three_component_plot_context(all_component_data)
 
-        stack_by_comp, t_abs, mask = render_and_collect_three_component_stacks(
-            all_component_data=all_component_data,
-            comp_order=comp_order,
-            comp_titles=comp_titles,
-            show_record=show_record_section_plot,
-            fig=fig,
-            gs=gs,
-            start_time=start_time,
-            end_time=end_time,
-            t_abs=t_abs,
-            mask=mask,
-        )
+            stack_by_comp, t_abs, mask = render_and_collect_three_component_stacks(
+                all_component_data=all_component_data,
+                comp_order=comp_order,
+                comp_titles=comp_titles,
+                show_record=show_record_section_plot,
+                fig=fig,
+                gs=gs,
+                start_time=start_time,
+                end_time=end_time,
+                t_abs=t_abs,
+                mask=mask,
+            )
 
-        save_dir = persist_three_component_outputs(
-            comp_order=comp_order,
-            stack_by_comp=stack_by_comp,
-            save_dir=save_dir,
-            eve_id=eve_id,
-            origin_env=origin_env,
-            start_time=start_time,
-            sample_rate_env=sample_rate_env,
-            show_record=show_record_section_plot,
-            fig=fig,
-            align_phase_name=align_phase,
-        )
+            save_dir = persist_three_component_outputs(
+                comp_order=comp_order,
+                stack_by_comp=stack_by_comp,
+                save_dir=save_dir,
+                eve_id=eve_id,
+                origin_env=origin_env,
+                start_time=start_time,
+                sample_rate_env=sample_rate_env,
+                show_record=show_record_section_plot,
+                fig=fig,
+                align_phase_name=align_phase,
+            )
 
-        # No R-T zero-diff station list saved.
-        plot_three_component_summary_products(
-            all_component_data=all_component_data,
-            comp_order=comp_order,
-            stack_by_comp=stack_by_comp,
-            sample_rate_env=sample_rate_env,
-            t_abs=t_abs,
-            mask=mask,
-            end_time=end_time,
-            start_time=start_time,
-            eve_id=eve_id,
-            align_phase_name=align_phase,
-            save_dir=save_dir,
-            origin_env=origin_env,
-            catalog_df=catalog_local,
-            pass_window_ids=pass_window_ids,
-        )
+            # No R-T zero-diff station list saved.
+            plot_three_component_summary_products(
+                all_component_data=all_component_data,
+                comp_order=comp_order,
+                stack_by_comp=stack_by_comp,
+                sample_rate_env=sample_rate_env,
+                t_abs=t_abs,
+                mask=mask,
+                end_time=end_time,
+                start_time=start_time,
+                eve_id=eve_id,
+                align_phase_name=align_phase,
+                save_dir=save_dir,
+                origin_env=origin_env,
+                catalog_df=catalog_local,
+                pass_window_ids=pass_window_ids_for_event,
+            )
 
-        finalize_three_component_plotting(_plot3_wall_start, _plot3_cpu_start)
+            finalize_three_component_plotting(_plot3_wall_start, _plot3_cpu_start)
 
 def main() -> None:
     run_pipeline()

@@ -221,8 +221,13 @@ def make_event_output_dir(base_prefix: str, eve_id: str) -> Path:
 
 def load_event_metadata(eve_id: str, info_dir: Path):
     """Load event row and return key metadata for one event id."""
-    eve_info = pd.read_csv(info_dir / "catalog_20220930_8events.csv")
-    row = eve_info.loc[eve_info["evid"] == eve_id].iloc[0]
+    catalog_file = info_dir / "catalog_20220930_allevents.csv"
+    eve_info = pd.read_csv(catalog_file)
+
+    rows = eve_info.loc[eve_info["evid"] == eve_id]
+    if rows.empty:
+        raise ValueError(f"Event ID '{eve_id}' not found in catalog {catalog_file}")
+    row = rows.iloc[0]
     event_depth = float(row["depth"])
     eve_lat = float(row["latitude"])
     eve_lon = float(row["longitude"])

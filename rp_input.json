@@ -12,11 +12,15 @@
   "align_phase": "S",
   "verbose": false,
   "path_prefix": "/Users/jvidale/Documents/Research/FaultScanR/",
-  "info_root": "/Users/jvidale/Documents/Research/FaultScanR/20220930_events_cut/event_sta_info",
+  "info_root": "/Users/jvidale/Documents/Research/FaultScanR/event_sta_info",
   "sps_rate": "down100",
-  "data_path": "/Users/jvidale/Documents/Research/FaultScanR/20220930_events_cut/20220930_down100",
+  "data_path": "/Users/jvidale/Documents/Research/FaultScanR/Sgrams/20220930_down100",
+  "use_snippets_input": true,
+  "snippets_root": "/Users/jvidale/Documents/Research/FaultScanR/Sgrams/Snippets",
   "events": [
-    "CI_40353544"
+    "CI_40353544",
+    "CI_40353664",
+    "CI_40353840"
   ],
   "show_individual_seismograms": false,
   "show_record_section_plot": false
