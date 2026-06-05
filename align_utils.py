@@ -7,8 +7,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from obspy import read, Stream, Trace
 from obspy.geodetics import gps2dist_azimuth
+from obspy.geodetics import degrees2kilometers, locations2degrees
 from obspy import UTCDateTime
+from obspy.signal.rotate import rotate_ne_rt
 
 
 @dataclass
@@ -136,6 +139,78 @@ def build_component_output_payload(
     return payload
 
 
+def build_alignment_products_payload(
+    npts: int,
+    sample_rate: float,
+    move_limit_samples: int,
+    win_start: int,
+    win_end: int,
+    calc_shifts: dict,
+    aligned_stack: np.ndarray,
+    selected_aligned_stack: np.ndarray,
+    selected_ids: set,
+    station_corr: dict,
+    n_pass_window: int,
+    pass_window_ids: set,
+    snippet_by_station: dict,
+    ref_window: np.ndarray,
+    selected_rows: list,
+    rejected_rows: list,
+    station_shifts: dict,
+    aligned_traces_by_station: dict,
+    t_abs: np.ndarray,
+    mask: np.ndarray,
+    stack_vec: np.ndarray,
+):
+    """Assemble the alignment products payload used by downstream plotting/output."""
+    return {
+        "npts": npts,
+        "sample_rate": sample_rate,
+        "move_limit_samples": move_limit_samples,
+        "win_start": win_start,
+        "win_end": win_end,
+        "calc_shifts": calc_shifts,
+        "aligned_stack": aligned_stack,
+        "selected_aligned_stack": selected_aligned_stack,
+        "selected_ids": selected_ids,
+        "station_corr": station_corr,
+        "n_pass_window": n_pass_window,
+        "pass_window_ids": pass_window_ids,
+        "snippet_by_station": snippet_by_station,
+        "ref_window": ref_window,
+        "selected_rows": selected_rows,
+        "rejected_rows": rejected_rows,
+        "station_shifts": station_shifts,
+        "aligned_traces_by_station": aligned_traces_by_station,
+        "t_abs": t_abs,
+        "mask": mask,
+        "stack_vec": stack_vec,
+    }
+
+
+def write_component_stack_mseeds(
+    comp_order: list,
+    stack_by_comp: dict,
+    save_dir: Path,
+    eve_id: str,
+    origin_env,
+    start_time: float,
+    sample_rate_env: float,
+) -> None:
+    """Write one stack MSEED per component for combined three-component outputs."""
+    for comp_name in comp_order:
+        stack_vec = stack_by_comp[comp_name]
+        tr = Trace(data=stack_vec.astype(np.float32, copy=False))
+        tr.stats.starttime = origin_env + start_time
+        tr.stats.sampling_rate = float(sample_rate_env)
+        tr.stats.station = "STACK"
+        tr.stats.channel = comp_name
+        st_out = Stream(traces=[tr])
+        out_file = save_dir / f"{eve_id}_{comp_name}_stack.mseed"
+        st_out.write(str(out_file), format="MSEED")
+        print(f"✓ Wrote stack mseed: {out_file}")
+
+
 def make_event_output_dir(base_prefix: str, eve_id: str) -> Path:
     """Create and return output directory for one event."""
     save_path = Path(base_prefix + "output")
@@ -146,8 +221,13 @@ def make_event_output_dir(base_prefix: str, eve_id: str) -> Path:
 
 def load_event_metadata(eve_id: str, info_dir: Path):
     """Load event row and return key metadata for one event id."""
-    eve_info = pd.read_csv(info_dir / "catalog_20220930_8events.csv")
-    row = eve_info.loc[eve_info["evid"] == eve_id].iloc[0]
+    catalog_file = info_dir / "catalog_20220930_allevents.csv"
+    eve_info = pd.read_csv(catalog_file)
+
+    rows = eve_info.loc[eve_info["evid"] == eve_id]
+    if rows.empty:
+        raise ValueError(f"Event ID '{eve_id}' not found in catalog {catalog_file}")
+    row = rows.iloc[0]
     event_depth = float(row["depth"])
     eve_lat = float(row["latitude"])
     eve_lon = float(row["longitude"])
@@ -168,6 +248,194 @@ def load_station_lookup(info_dir: Path):
     sta_lat = sta_info["lat"]
     sta_lon = sta_info["lon"]
     return {sta_name[i]: (sta_lat[i], sta_lon[i]) for i in range(len(sta_name))}
+
+
+def read_waveforms_for_event(
+    eve_id: str,
+    channel: str,
+    process_as_three_comp_mode: bool,
+    horizontal_window_cache: dict,
+    horizontal_raw_limits_cache: dict,
+    name2ll: dict,
+    eve_lat: float,
+    eve_lon: float,
+    origin,
+    data_path: Path,
+    sps_rate: str,
+    start_time: float,
+    end_time: float,
+    verbose: bool,
+    timing_state: TimingState,
+):
+    """Read (or reuse) windowed traces for an event/channel and return stream + raw limits."""
+    use_horizontal_cache = (
+        process_as_three_comp_mode
+        and channel == "DP2"
+        and eve_id in horizontal_window_cache
+    )
+
+    if use_horizontal_cache:
+        st_window = horizontal_window_cache[eve_id].copy()
+        raw_limits_by_station = horizontal_raw_limits_cache.get(eve_id, {}).copy()
+        print("Reusing horizontal read cache for transverse component.")
+        return st_window, raw_limits_by_station
+
+    st_all = Stream()
+    stanum = 0
+    raw_limits_by_station = {}
+
+    _read_wall_start = time.perf_counter()
+    _read_cpu_start = time.process_time()
+    for sta, (slat, slon) in name2ll.items():
+        code_num = int(sta)
+        code_str = f"{code_num:05d}"
+
+        if channel in ["DP1", "DP2"]:
+            chan_list_this_sta = ["DP1", "DP2"]
+        else:
+            chan_list_this_sta = [channel]
+
+        dist_deg = locations2degrees(eve_lat, eve_lon, slat, slon)
+        dist_km = degrees2kilometers(dist_deg)
+
+        first_chan_for_sta = True
+
+        for ch_read in chan_list_this_sta:
+            fpath = (
+                data_path
+                / code_str
+                / f"{ch_read}.D"
+                / f"7V.{code_str}.00.{ch_read}.D.2022.273.{sps_rate}.mseed"
+            )
+            if verbose:
+                if stanum % 20 == 0:
+                    print(f"Reading station {sta} channel {ch_read} from {fpath}")
+            if not fpath.exists():
+                if verbose:
+                    print("No such file")
+                continue
+
+            st_win = read(
+                str(fpath),
+                starttime=origin + start_time,
+                endtime=origin + end_time,
+            )
+            if len(st_win) == 0:
+                continue
+            tr = st_win[0]
+            if sta not in raw_limits_by_station:
+                raw_limits_by_station[sta] = (tr.stats.starttime, tr.stats.endtime)
+
+            tr.stats.dist_km = dist_km
+            tr.stats.dist_deg = dist_deg
+            tr.stats.relatime = tr.times(reftime=origin)
+            tr.stats.station = sta
+            st_all.append(tr)
+
+            if first_chan_for_sta:
+                stanum += 1
+                if stanum % 100 == 0:
+                    print(f"Event {eve_id}: processed {stanum} stations...")
+                first_chan_for_sta = False
+    add_stage_timing(timing_state, "waveform_read_slice", _read_wall_start, _read_cpu_start)
+
+    st_all.sort(keys=["dist_km"])
+    if not st_all:
+        print(f"No traces found for event {eve_id}, skip.")
+        return None, None
+
+    st_window = Stream()
+    kept = 0
+    for tr in st_all:
+        if tr.stats.endtime >= origin + start_time and tr.stats.starttime <= origin + end_time:
+            tr_i = tr.copy()
+            if tr_i is not None and tr_i.stats.npts > 0:
+                tr_i.stats.station = tr.stats.station
+                st_window.append(tr_i)
+                kept += 1
+
+    if kept == 0:
+        print("  No data in plot window (start_time to end_time).")
+        return None, None
+
+    if process_as_three_comp_mode and channel == "DP1":
+        horizontal_window_cache[eve_id] = st_window.copy()
+        horizontal_raw_limits_cache[eve_id] = raw_limits_by_station.copy()
+
+    return st_window, raw_limits_by_station
+
+
+def rotate_horizontals_to_component(
+    st_window,
+    sel_comp: str,
+    name2ll: dict,
+    eve_lat: float,
+    eve_lon: float,
+    timing_state: TimingState,
+):
+    """Rotate DP1/DP2 traces to selected R or T component and return stream + label."""
+    st_n = st_window.select(channel="DP1")
+    st_e = st_window.select(channel="DP2")
+    rotated_traces = []
+    plot_comp = sel_comp
+
+    _rotate_wall_start = time.perf_counter()
+    _rotate_cpu_start = time.process_time()
+    for tr_n in st_n:
+        sid = str(tr_n.stats.station)
+        st_e_match = st_e.select(station=sid)
+        if len(st_e_match) == 0:
+            continue
+        tr_e = st_e_match[0]
+
+        slat, slon = name2ll[sid]
+        _, _, baz_geo = gps2dist_azimuth(eve_lat, eve_lon, slat, slon)
+        baz = baz_geo - 11.0
+
+        npts_rot = min(tr_n.stats.npts, tr_e.stats.npts)
+        n = tr_n.data[:npts_rot]
+        e = tr_e.data[:npts_rot]
+        r, t = rotate_ne_rt(n, e, baz)
+
+        if sel_comp == "R":
+            tr_r = tr_n.copy()
+            tr_r.data = r
+            tr_r.stats.channel = tr_n.stats.channel[:-1] + "R"
+            rotated_traces.append(tr_r)
+            plot_comp = "R"
+        elif sel_comp == "T":
+            tr_t = tr_n.copy()
+            tr_t.data = t
+            tr_t.stats.channel = tr_n.stats.channel[:-1] + "T"
+            rotated_traces.append(tr_t)
+            plot_comp = "T"
+
+    add_stage_timing(timing_state, "rotate_to_rt", _rotate_wall_start, _rotate_cpu_start)
+    return Stream(traces=rotated_traces), plot_comp
+
+
+def preprocess_traces_bandpass(
+    st_comp,
+    min_freq: float,
+    max_freq: float,
+    timing_state: TimingState,
+) -> None:
+    """Detrend/taper/filter traces prior to alignment."""
+    _pre_wall_start = time.perf_counter()
+    _pre_cpu_start = time.process_time()
+    for tr in st_comp:
+        tr.detrend(type="demean")
+        trace_len_sec = float(tr.stats.npts) / float(tr.stats.sampling_rate)
+        taper_pct = min(0.05, 5.0 / trace_len_sec) if trace_len_sec > 0 else 0.0
+        tr.taper(max_percentage=taper_pct, type="cosine")
+        tr.filter(
+            "bandpass",
+            freqmin=min_freq,
+            freqmax=max_freq,
+            corners=4,
+            zerophase=True,
+        )
+    add_stage_timing(timing_state, "preprocess_filter", _pre_wall_start, _pre_cpu_start)
 
 
 def select_reference_trace(st_comp, name2ll: dict):
@@ -259,6 +527,323 @@ def compute_phase_travel_times(model_obj, event_depth: float, ref_trace, origin_
         phase_traveltime = None
 
     return p_traveltime, s_traveltime, p_arrival_time, s_arrival_time, phase_traveltime
+
+
+def compute_taup_station_shifts(
+    model_obj,
+    st_comp,
+    event_depth: float,
+    align_phase_name: str,
+    t_ref,
+    timing_state: TimingState,
+) -> dict:
+    """Compute TauP time shifts per station relative to reference arrival time."""
+    calc_shifts = {}
+    if t_ref is None:
+        return calc_shifts
+
+    phase_key = align_phase_name.upper()
+    _taup_wall_start = time.perf_counter()
+    _taup_cpu_start = time.process_time()
+    for tr in st_comp:
+        station_id = str(tr.stats.station)
+        dist_deg = float(tr.stats.dist_deg)
+
+        tts_sta = model_obj.get_travel_times(
+            source_depth_in_km=event_depth,
+            distance_in_degree=dist_deg,
+            phase_list=[phase_key.lower(), phase_key.upper()],
+        )
+        t_sta = None
+        for tt in reversed(tts_sta):
+            if tt.phase.name.upper() == phase_key:
+                t_sta = float(tt.time)
+                break
+
+        if t_sta is not None:
+            calc_shifts[station_id] = t_sta - t_ref
+    add_stage_timing(timing_state, "taup_station_shifts", _taup_wall_start, _taup_cpu_start)
+    return calc_shifts
+
+
+def compute_alignment_setup(
+    st_comp,
+    ref_trace,
+    move_limit_sec: float,
+    start_time: float,
+    win_pre: float,
+    win_post: float,
+    t_ref,
+):
+    """Compute shared setup values used across alignment stages."""
+    npts = min(tr.stats.npts for tr in st_comp)
+    sample_rate = float(st_comp[0].stats.sampling_rate)
+    ref = ref_trace.data[:npts]
+    move_limit_samples = int(round(move_limit_sec * sample_rate))
+
+    t0 = float(t_ref) if t_ref is not None else 0.0
+    center_time = t0
+    win_start = int(max(0, sample_rate * ((center_time - start_time) - win_pre)))
+    win_end = int(min(npts, sample_rate * ((center_time - start_time) + win_post)))
+
+    return {
+        "npts": npts,
+        "sample_rate": sample_rate,
+        "ref": ref,
+        "move_limit_samples": move_limit_samples,
+        "win_start": win_start,
+        "win_end": win_end,
+    }
+
+
+def normalize_traces_in_window(st_comp, win_start: int, win_end: int) -> None:
+    """Normalize each trace by max amplitude within the correlation window."""
+    for tr in st_comp:
+        win = tr.data[win_start:win_end]
+        mx = np.max(np.abs(win)) if win.size > 0 else 0.0
+        if mx > 0:
+            tr.data = tr.data / mx
+
+
+def compute_stage1_aligned_stack(
+    st_comp,
+    ref: np.ndarray,
+    npts: int,
+    sample_rate: float,
+    win_start: int,
+    win_end: int,
+    move_limit_samples: int,
+    calc_shifts: dict,
+    timing_state: TimingState,
+) -> np.ndarray:
+    """Stage 1: align traces to reference and return normalized stack."""
+    aligned_stack = np.zeros(npts)
+    _stage1_wall_start = time.perf_counter()
+    _stage1_cpu_start = time.process_time()
+    for tr in st_comp:
+        d = tr.data[:npts]
+        lag0 = 0
+        rolled = shift_left_zeropad(d, lag0)
+
+        station_id = str(tr.stats.station)
+        if station_id in calc_shifts:
+            expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
+            rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
+            lag1 = expected_shift_samples + compute_lag(
+                ref, rolled_expected, win_start, win_end, move_limit_samples
+            )
+        else:
+            lag1 = lag0 + compute_lag(ref, rolled, win_start, win_end, move_limit_samples)
+
+        aligned_stack += shift_left_zeropad(d, lag1)
+    add_stage_timing(timing_state, "align_stage1", _stage1_wall_start, _stage1_cpu_start)
+
+    win = aligned_stack[win_start:win_end]
+    mx = np.max(np.abs(win)) if win.size > 0 else 0.0
+    if mx > 0:
+        aligned_stack = aligned_stack / mx
+    return aligned_stack
+
+
+def compute_stage2_screened_stack(
+    st_comp,
+    aligned_stack: np.ndarray,
+    npts: int,
+    sample_rate: float,
+    win_start: int,
+    win_end: int,
+    move_limit_samples: int,
+    calc_shifts: dict,
+    r_window_min: float,
+    timing_state: TimingState,
+):
+    """Stage 2: align to Stage-1 stack, score window correlation, and keep passing traces."""
+    selected_aligned_stack = np.zeros(npts)
+    selected_ids = set()
+    station_corr = {}
+    n_pass_window = 0
+    pass_window_ids = set()
+    snippet_by_station = {}
+    ref_window = aligned_stack[win_start:win_end]
+
+    _stage2_wall_start = time.perf_counter()
+    _stage2_cpu_start = time.process_time()
+    for tr in st_comp:
+        d = tr.data[:npts]
+        station_id = str(tr.stats.station)
+
+        lag0 = 0
+        rolled = shift_left_zeropad(d, lag0)
+
+        if station_id in calc_shifts:
+            expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
+            rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
+            lag2 = expected_shift_samples + compute_lag(
+                aligned_stack,
+                rolled_expected,
+                win_start,
+                win_end,
+                move_limit_samples,
+            )
+        else:
+            lag2 = lag0 + compute_lag(
+                aligned_stack, rolled, win_start, win_end, move_limit_samples
+            )
+
+        aligned_data = shift_left_zeropad(d, lag2)
+        aligned_window = aligned_data[win_start:win_end]
+        snippet_by_station[station_id] = aligned_window.copy()
+
+        if np.linalg.norm(aligned_window) == 0 or np.linalg.norm(ref_window) == 0:
+            r_window = 0.0
+        else:
+            r_window = float(
+                np.dot(aligned_window, ref_window)
+                / (np.linalg.norm(aligned_window) * np.linalg.norm(ref_window))
+            )
+
+        if r_window >= r_window_min:
+            n_pass_window += 1
+            pass_window_ids.add(station_id)
+
+        station_corr[station_id] = r_window
+
+        if r_window >= r_window_min:
+            selected_aligned_stack += aligned_data
+            selected_ids.add(station_id)
+        else:
+            print(f"    Rejected {station_id}: r_win={r_window:.2f}")
+    add_stage_timing(timing_state, "align_stage2_screen", _stage2_wall_start, _stage2_cpu_start)
+
+    win = selected_aligned_stack[win_start:win_end]
+    mx = np.max(np.abs(win)) if win.size > 0 else 0.0
+    if mx > 0:
+        selected_aligned_stack = selected_aligned_stack / mx
+
+    return {
+        "selected_aligned_stack": selected_aligned_stack,
+        "selected_ids": selected_ids,
+        "station_corr": station_corr,
+        "n_pass_window": n_pass_window,
+        "pass_window_ids": pass_window_ids,
+        "snippet_by_station": snippet_by_station,
+        "ref_window": ref_window,
+    }
+
+
+def compute_stage3_finalized_rows(
+    st_comp,
+    ref: np.ndarray,
+    ref_station_id: str,
+    selected_ids: set,
+    calc_shifts: dict,
+    npts: int,
+    sample_rate: float,
+    win_start: int,
+    win_end: int,
+    move_limit_samples: int,
+    name2ll: dict,
+    eve_lat: float,
+    eve_lon: float,
+    timing_state: TimingState,
+):
+    """Stage 3: align traces on reference timebase and build selected/rejected rows."""
+    selected_rows = []  # (dist_km, station_id, y_aligned_norm)
+    rejected_rows = []
+    aligned_bank = []
+    aligned_bank_all = []
+    station_shifts = {}
+    aligned_traces_by_station = {}
+
+    _stage3_wall_start = time.perf_counter()
+    _stage3_cpu_start = time.process_time()
+    for tr in st_comp:
+        x = tr.data[:npts]
+        station_id = str(tr.stats.station)
+
+        if station_id == ref_station_id:
+            lag3 = 0
+            y = x.copy()
+        else:
+            if station_id in calc_shifts:
+                expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
+                x_expected = shift_left_zeropad(x, expected_shift_samples)
+                lag_delta = compute_lag(
+                    ref, x_expected, win_start, win_end, move_limit_samples
+                )
+                lag3 = expected_shift_samples + lag_delta
+            else:
+                lag3 = compute_lag(ref, x, win_start, win_end, move_limit_samples)
+            y = shift_left_zeropad(x, lag3)
+
+        station_shifts[station_id] = {
+            "lag_samples": lag3,
+            "lag_seconds": lag3 / sample_rate,
+        }
+
+        win = y[win_start:win_end]
+        my = np.max(np.abs(win)) if win.size > 0 else 1.0
+        if my > 0:
+            y = y / my
+
+        aligned_traces_by_station[station_id] = y.copy()
+        aligned_bank_all.append(y)
+
+        slat, slon = name2ll[station_id]
+        dist_m, _, _ = gps2dist_azimuth(eve_lat, eve_lon, slat, slon)
+        dist_km = dist_m / 1000.0
+
+        if station_id in selected_ids:
+            selected_rows.append((dist_km, station_id, y))
+            aligned_bank.append(y)
+        else:
+            rejected_rows.append((dist_km, station_id, y))
+    add_stage_timing(timing_state, "align_stage3_finalize", _stage3_wall_start, _stage3_cpu_start)
+
+    selected_rows.sort(key=lambda t: t[0])
+    rejected_rows.sort(key=lambda t: t[0])
+    print(
+        f"    Final lag3 traces: selected={len(selected_rows)}, "
+        f"rejected={len(rejected_rows)}, total={len(selected_rows) + len(rejected_rows)}"
+    )
+
+    return {
+        "selected_rows": selected_rows,
+        "rejected_rows": rejected_rows,
+        "aligned_bank": aligned_bank,
+        "aligned_bank_all": aligned_bank_all,
+        "station_shifts": station_shifts,
+        "aligned_traces_by_station": aligned_traces_by_station,
+    }
+
+
+def compute_time_axis_and_stack(
+    start_time: float,
+    end_time: float,
+    npts: int,
+    sample_rate: float,
+    aligned_bank_all: list,
+    win_start: int,
+    win_end: int,
+):
+    """Build time axis/mask and normalized final stack from aligned traces."""
+    t_abs = start_time + (np.arange(npts) / sample_rate)
+    mask = (t_abs >= start_time) & (t_abs <= end_time)
+
+    if len(aligned_bank_all) > 0:
+        stack_vec = np.mean(np.vstack(aligned_bank_all), axis=0)
+        win = stack_vec[win_start:win_end]
+        ms = np.max(np.abs(win)) if win.size > 0 else 1.0
+        if ms > 0:
+            stack_vec = stack_vec / ms
+    else:
+        stack_vec = np.zeros_like(t_abs)
+
+    return {
+        "t_abs": t_abs,
+        "mask": mask,
+        "stack_vec": stack_vec,
+    }
 
 
 def compute_lag(
