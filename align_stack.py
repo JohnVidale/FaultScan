@@ -1,3 +1,4 @@
+# code by John Vidale and codex
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -69,6 +70,7 @@ info_root = Path(path_prefix + "event_sta_info")
 # data_path = Path(path_prefix + "20220930_events_cut/07_1hour_20220930")
 
 sps_rate = "down100"
+# sps_rate = "hour_down50"
 data_path = Path(path_prefix + "Sgrams/20220930_" + sps_rate)
 use_snippets_input = False
 snippets_root = Path(path_prefix + "Sgrams/Snippets")
