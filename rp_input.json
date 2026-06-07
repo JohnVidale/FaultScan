@@ -1,27 +1,21 @@
 {
-  "min_freq": 3.0,
-  "max_freq": 10.0,
-  "start_time": -10.0,
-  "end_time": 20.0,
+  "min_freq": 6.0,
+  "max_freq": 20.0,
+  "start_time": 0.0,
+  "end_time": 10.0,
   "win_pre": 0.5,
   "win_post": 0.5,
   "r_window_min": 0.6,
-  "move_limit_sec": 0.05,
-  "all_channels": true,
+  "move_limit_sec": 0.1,
+  "all_channels": false,
   "component": "R",
   "align_phase": "S",
   "verbose": false,
-  "path_prefix": "/Users/jvidale/Documents/Research/FaultScanR/",
-  "info_root": "/Users/jvidale/Documents/Research/FaultScanR/event_sta_info",
-  "sps_rate": "down100",
-  "data_path": "/Users/jvidale/Documents/Research/FaultScanR/Sgrams/20220930_down100",
-  "use_snippets_input": true,
-  "snippets_root": "/Users/jvidale/Documents/Research/FaultScanR/Sgrams/Snippets",
+  "input_mode": "snippets",
+  "analysis_hz": 250,
   "events": [
-    "CI_40353544",
-    "CI_40353664",
-    "CI_40353840"
+    "CI_40353864"
   ],
   "show_individual_seismograms": false,
-  "show_record_section_plot": false
+  "show_record_section_plot": true
 }

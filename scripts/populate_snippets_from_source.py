@@ -13,6 +13,31 @@ from obspy import UTCDateTime, read
 CHANNELS = ("DP1", "DP2", "DPZ")
 
 
+def station_code(sta_dir: Path) -> str:
+    """Return the uniform 3-digit station code used in snippet directories."""
+    return sta_dir.name[-3:].zfill(3)
+
+
+def snippet_name(evid: str, sta_code: str, channel: str) -> str:
+    """Return the uniform snippet filename for one event/station/component."""
+    return f"{evid}_{sta_code}_{channel}.mseed"
+
+
+def find_input_file(sta_dir: Path, channel: str) -> Path | None:
+    """Find the source miniSEED file for one station/channel across naming variants."""
+    chan_dir = sta_dir / f"{channel}.D"
+    if not chan_dir.exists():
+        return None
+
+    prefix = f"7V.{sta_dir.name}.00.{channel}.D.2022.273"
+
+    # Most specific first; supports both suffixed (e.g., down100) and plain 250Hz names.
+    candidates = sorted(chan_dir.glob(f"{prefix}*.mseed"))
+    if not candidates:
+        return None
+    return candidates[0]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -131,11 +156,11 @@ def main() -> int:
 
         for sta_dir in station_dirs:
             for ch in CHANNELS:
-                in_file = (
-                    sta_dir
-                    / f"{ch}.D"
-                    / f"7V.{sta_dir.name}.00.{ch}.D.2022.273.down100.mseed"
-                )
+                in_file = find_input_file(sta_dir, ch)
+                if in_file is None:
+                    total_missing += 1
+                    continue
+
                 if not in_file.exists():
                     total_missing += 1
                     continue
@@ -155,9 +180,9 @@ def main() -> int:
                     total_empty += 1
                     continue
 
-                out_dir = event_dir / sta_dir.name / f"{ch}.D"
+                out_dir = event_dir / station_code(sta_dir) / f"{ch}.D"
                 out_dir.mkdir(parents=True, exist_ok=True)
-                out_file = out_dir / in_file.name
+                out_file = out_dir / snippet_name(evid, station_code(sta_dir), ch)
                 st.write(str(out_file), format="MSEED")
                 written_this_event += 1
                 total_written += 1
