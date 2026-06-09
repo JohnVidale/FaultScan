@@ -1,7 +1,11 @@
 import importlib
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from unittest.mock import Mock
+
+import pandas as pd
 
 
 class AlignStackSmokeTests(unittest.TestCase):
@@ -166,8 +170,12 @@ class AlignStackSmokeTests(unittest.TestCase):
             return_value=(10.0, 35.0, -117.0, None),
         ), patch.object(
             self.mod,
-            "make_event_output_dir",
+            "get_run_event_output_dir",
             return_value="/tmp/out",
+        ), patch.object(
+            self.mod,
+            "apply_event_location_override",
+            side_effect=lambda event_depth, eve_lat, eve_lon: (event_depth, eve_lat, eve_lon),
         ), patch.object(
             self.mod,
             "load_station_lookup",
@@ -189,30 +197,39 @@ class AlignStackSmokeTests(unittest.TestCase):
     def test_load_event_context_and_waveforms_success_shape(self):
         fake_stream = object()
         fake_limits = {"STA": (0.0, 1.0)}
-        with patch.object(
-            self.mod,
-            "load_event_metadata",
-            return_value=(10.0, 35.0, -117.0, None),
-        ), patch.object(
-            self.mod,
-            "make_event_output_dir",
-            return_value="/tmp/out",
-        ), patch.object(
-            self.mod,
-            "load_station_lookup",
-            return_value={"STA": (35.0, -117.0)},
-        ), patch.object(
-            self.mod,
-            "read_waveforms_for_event",
-            return_value=(fake_stream, fake_limits),
-        ):
-            out = self.mod.load_event_context_and_waveforms(
-                eve_id="E1",
-                channel="DPZ",
-                process_as_three_comp=False,
-                horizontal_window_cache={},
-                horizontal_raw_limits_cache={},
-            )
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(
+                self.mod,
+                "load_event_metadata",
+                return_value=(10.0, 35.0, -117.0, None),
+            ), patch.object(
+                self.mod,
+                "get_run_event_output_dir",
+                return_value="/tmp/out",
+            ), patch.object(
+                self.mod,
+                "apply_event_location_override",
+                side_effect=lambda event_depth, eve_lat, eve_lon: (event_depth, eve_lat, eve_lon),
+            ), patch.object(
+                self.mod,
+                "load_station_lookup",
+                return_value={"STA": (35.0, -117.0)},
+            ), patch.object(
+                self.mod,
+                "get_event_data_path",
+                return_value=Path(tmp),
+            ), patch.object(
+                self.mod,
+                "read_waveforms_for_event",
+                return_value=(fake_stream, fake_limits),
+            ):
+                out = self.mod.load_event_context_and_waveforms(
+                    eve_id="E1",
+                    channel="DPZ",
+                    process_as_three_comp=False,
+                    horizontal_window_cache={},
+                    horizontal_raw_limits_cache={},
+                )
 
         self.assertIsNotNone(out)
         self.assertEqual(len(out), 8)
@@ -320,6 +337,53 @@ class AlignStackSmokeTests(unittest.TestCase):
             )
 
         self.assertEqual(out, expected)
+
+    def test_apply_event_location_override_uses_configured_values(self):
+        with patch.object(self.mod, "event_lat_override", 33.48), patch.object(
+            self.mod,
+            "event_lon_override",
+            -116.513,
+        ), patch.object(self.mod, "event_depth_override", 9.3):
+            out = self.mod.apply_event_location_override(
+                event_depth=1.0,
+                eve_lat=2.0,
+                eve_lon=3.0,
+            )
+
+        self.assertEqual(out, (9.3, 33.48, -116.513))
+
+    def test_write_radial_s_wave_time_shifts_saves_residual_excel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(self.mod, "path_prefix", f"{tmp}/"):
+                out = self.mod.write_radial_s_wave_time_shifts(
+                    save_dir=Path(tmp) / "event_plots",
+                    eve_id="EV1",
+                    plot_comp="R",
+                    align_phase_name="S",
+                    station_shifts={
+                        "2": {"lag_samples": 5, "lag_seconds": 0.05},
+                        "1": {"lag_samples": 2, "lag_seconds": 0.02},
+                    },
+                    calc_shifts={"1": 0.01, "2": -0.02},
+                    station_corr={"1": 0.9, "2": 0.7},
+                    pass_window_ids={"1"},
+                    sample_rate=100.0,
+                    min_freq_hz=3.0,
+                    max_freq_hz=10.0,
+                )
+
+            self.assertIsNotNone(out)
+            self.assertEqual(out.parent.name, "Statics")
+            self.assertEqual(out.parent.parent.name, "output")
+            self.assertEqual(out.name, "EV1_R_S_3-10Hz_xcorr_statics.xlsx")
+            self.assertEqual(out.suffix, ".xlsx")
+            df = pd.read_excel(out)
+
+        self.assertEqual(list(df["station"].astype(str)), ["1", "2"])
+        self.assertAlmostEqual(df.loc[0, "shift_relative_to_predicted_seconds"], 0.01)
+        self.assertAlmostEqual(df.loc[1, "shift_relative_to_predicted_seconds"], 0.07)
+        self.assertTrue(bool(df.loc[0, "passed_window_correlation"]))
+        self.assertFalse(bool(df.loc[1, "passed_window_correlation"]))
 
 
 if __name__ == "__main__":

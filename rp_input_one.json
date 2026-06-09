@@ -1,0 +1,24 @@
+{
+  "min_freq": 3.0,
+  "max_freq": 10.0,
+  "start_time": 0.0,
+  "end_time": 10.0,
+  "win_pre": 0.5,
+  "win_post": 0.5,
+  "r_window_min": 0.6,
+  "move_limit_sec": 0.1,
+  "all_channels": false,
+  "component": "R",
+  "align_phase": "S",
+  "verbose": false,
+  "input_mode": "snippets",
+  "analysis_hz": 250,
+  "event_lat": 33.480,
+  "event_lon": -116.513,
+  "event_depth": 9.300,
+  "events": [
+    "CI_40353864"
+  ],
+  "show_individual_seismograms": false,
+  "show_record_section_plot": true
+}

@@ -75,6 +75,9 @@ snippets_root = Path(path_prefix + f"Sgrams/Snippets_{analysis_hz}Hz")
 event       = "CI_40353544" # Single run selection (used when the corresponding "all_*" is False)
 # event       = "CI_40353664" # Single run selection (used when the corresponding "all_*" is False)
 events = [event]        # Allows for future modification to process multiple events
+event_lat_override: float | None = None
+event_lon_override: float | None = None
+event_depth_override: float | None = None
 
 # plotting options (user-facing)
 show_individual_seismograms = False  # Plot individual seismograms (20 traces/plot, 5 panels/figure)
@@ -92,6 +95,7 @@ def apply_input_config(config_file: Path) -> None:
     global data_path, event, events
     global analysis_hz, input_mode
     global snippets_root
+    global event_lat_override, event_lon_override, event_depth_override
     global show_individual_seismograms, show_record_section_plot
 
     def parse_sampling_hz(value, default_hz: int) -> int:
@@ -146,6 +150,23 @@ def apply_input_config(config_file: Path) -> None:
         events = [str(cfg["event"])]
     if events:
         event = events[0]
+
+    lat_cfg = cfg.get("event_lat")
+    lon_cfg = cfg.get("event_lon")
+    depth_cfg = cfg.get("event_depth")
+    if lat_cfg is not None or lon_cfg is not None or depth_cfg is not None:
+        if lat_cfg is None or lon_cfg is None or depth_cfg is None:
+            print(
+                "[WARN] Event location override requires event_lat, event_lon, "
+                "and event_depth; using catalog location."
+            )
+            event_lat_override = None
+            event_lon_override = None
+            event_depth_override = None
+        else:
+            event_lat_override = float(lat_cfg)
+            event_lon_override = float(lon_cfg)
+            event_depth_override = float(depth_cfg)
 
     data_path = Path(path_prefix + f"Sgrams/20220930_{analysis_hz}Hz")
     snippets_root = Path(path_prefix + f"Sgrams/Snippets_{analysis_hz}Hz")
@@ -209,6 +230,9 @@ def write_run_parameter_snapshot(output_dir: Path) -> Path:
         "data_path": _snapshot_path(data_path),
         "snippets_root": _snapshot_path(snippets_root),
         "events": list(events),
+        "event_lat_override": event_lat_override,
+        "event_lon_override": event_lon_override,
+        "event_depth_override": event_depth_override,
         "show_individual_seismograms": show_individual_seismograms,
         "show_record_section_plot": show_record_section_plot,
     }
@@ -239,6 +263,27 @@ def get_run_event_output_dir(eve_id: str) -> Path:
     event_dir = RUN_OUTPUT_DIR / eve_id  # type: ignore[union-attr]
     event_dir.mkdir(parents=True, exist_ok=True)
     return event_dir
+
+
+def apply_event_location_override(
+    event_depth: float,
+    eve_lat: float,
+    eve_lon: float,
+) -> tuple[float, float, float]:
+    """Return configured event lat/lon/depth overrides when all are supplied."""
+    if (
+        event_lat_override is None
+        or event_lon_override is None
+        or event_depth_override is None
+    ):
+        return event_depth, eve_lat, eve_lon
+
+    print(
+        "Using event location override from rp_input.json: "
+        f"lat={event_lat_override:.6f}, lon={event_lon_override:.6f}, "
+        f"depth={event_depth_override:.3f} km"
+    )
+    return event_depth_override, event_lat_override, event_lon_override
 
 # ===================== Helper functions =====================
 
@@ -573,6 +618,66 @@ def plot_estimated_vs_calculated_shifts(
     estcalc_file = save_dir / f"{eve_id}_{plot_comp}_est_vs_calc_shift_{align_phase_name}.png"
     fig_ec.savefig(estcalc_file, dpi=300, bbox_inches="tight")
     print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
+
+
+def write_radial_s_wave_time_shifts(
+    save_dir: Path,
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    station_shifts: dict,
+    calc_shifts: dict,
+    station_corr: dict,
+    pass_window_ids: set,
+    sample_rate: float,
+    min_freq_hz: float,
+    max_freq_hz: float,
+) -> Path | None:
+    """Save radial S-wave cross-correlation shifts relative to predicted arrivals."""
+    if plot_comp.upper() != "R" or align_phase_name.upper() != "S":
+        return None
+
+    def station_sort_key(station_id: str):
+        try:
+            return (0, int(station_id))
+        except ValueError:
+            return (1, station_id)
+
+    rows = []
+    for station_id in sorted(station_shifts.keys(), key=station_sort_key):
+        measured_shift = float(station_shifts[station_id]["lag_seconds"])
+        predicted_shift = calc_shifts.get(station_id)
+        predicted_shift = float(predicted_shift) if predicted_shift is not None else np.nan
+        residual_shift = measured_shift - predicted_shift if np.isfinite(predicted_shift) else np.nan
+
+        rows.append(
+            {
+                "event_id": eve_id,
+                "station": station_id,
+                "component": plot_comp,
+                "phase": align_phase_name.upper(),
+                "sample_rate_hz": float(sample_rate),
+                "lag_samples": int(station_shifts[station_id]["lag_samples"]),
+                "xcorr_shift_seconds": measured_shift,
+                "predicted_shift_seconds": predicted_shift,
+                "shift_relative_to_predicted_seconds": residual_shift,
+                "window_correlation": float(station_corr.get(station_id, np.nan)),
+                "passed_window_correlation": station_id in pass_window_ids,
+            }
+        )
+
+    if not rows:
+        print("[WARN] No radial S-wave station shifts available to save.")
+        return None
+
+    statics_dir = Path(path_prefix + "output") / "Statics"
+    statics_dir.mkdir(parents=True, exist_ok=True)
+
+    freq_label = f"{min_freq_hz:g}-{max_freq_hz:g}Hz".replace(".", "p")
+    out_file = statics_dir / f"{eve_id}_R_S_{freq_label}_xcorr_statics.xlsx"
+    pd.DataFrame(rows).to_excel(out_file, index=False)
+    print(f"✓ Radial S-wave statics saved to: {out_file}")
+    return out_file
 
 
 def plot_snippet_comparison(
@@ -1824,6 +1929,7 @@ def load_event_context_and_waveforms(
 ):
     """Load event metadata/station lookup and read event waveforms for one channel."""
     event_depth, eve_lat, eve_lon, origin = load_event_metadata(eve_id, info_root)
+    event_depth, eve_lat, eve_lon = apply_event_location_override(event_depth, eve_lat, eve_lon)
     save_dir = get_run_event_output_dir(eve_id)
     name2ll = load_station_lookup(info_root)
     event_data_path = get_event_data_path(eve_id)
@@ -2332,6 +2438,20 @@ def run_pipeline() -> None:
                 t_ref=t_ref,
             )
             pass_window_ids_for_event = pass_window_ids
+
+            write_radial_s_wave_time_shifts(
+                save_dir=save_dir,
+                eve_id=eve_id,
+                plot_comp=plot_comp,
+                align_phase_name=align_phase,
+                station_shifts=station_shifts,
+                calc_shifts=calc_shifts,
+                station_corr=station_corr,
+                pass_window_ids=pass_window_ids,
+                sample_rate=sample_rate,
+                min_freq_hz=min_freq,
+                max_freq_hz=max_freq,
+            )
 
             _plot_wall_start, _plot_cpu_start = start_plot_timing()
             if not all_channels:
