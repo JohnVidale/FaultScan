@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -13,6 +14,35 @@ import pandas as pd
 DEFAULT_STATICS_DIR = Path("/Users/jvidale/Documents/Research/FaultScanR/output/Statics")
 STATIC_COLUMN = "shift_relative_to_predicted_seconds"
 CORRECTED_STATIC_COLUMN = "event_baseline_corrected_static_seconds"
+COMPONENT_LABELS = {
+    "Z": "Vertical",
+    "R": "Radial",
+    "T": "Transverse",
+}
+DEFAULT_CONFIG_FILE = Path("rp_input.json")
+
+
+def read_run_config(config_file: Path) -> dict:
+    """Read run config values when available."""
+    try:
+        with config_file.open() as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+def default_component_from_config(config: dict, config_file: Path) -> str:
+    """Read the plotting component from the run config when available."""
+    component = str(config.get("component", "R")).upper()
+
+    if component not in COMPONENT_LABELS:
+        raise ValueError(f"{config_file} has unsupported component {component!r}; expected Z, R, or T")
+    return component
+
+
+def default_phase_from_config(config: dict) -> str:
+    """Read the plotting phase from the run config when available."""
+    return str(config.get("align_phase", "S")).upper()
 
 
 def robust_sigma(values: pd.Series) -> float:
@@ -33,7 +63,7 @@ def station_sort_key(station_id: str):
         return (1, station_id)
 
 
-def load_statics(statics_dir: Path) -> pd.DataFrame:
+def load_statics(statics_dir: Path, component: str | None = None, phase: str | None = None) -> pd.DataFrame:
     files = sorted(statics_dir.glob("*_xcorr_statics.xlsx"))
     if not files:
         raise FileNotFoundError(f"No statics workbooks found in {statics_dir}")
@@ -52,6 +82,22 @@ def load_statics(statics_dir: Path) -> pd.DataFrame:
     out = pd.concat(frames, ignore_index=True)
     out["station"] = out["station"].astype(str)
     out = out[np.isfinite(out[STATIC_COLUMN].astype(float))]
+    if component is not None:
+        if "component" not in out.columns:
+            raise ValueError("Cannot filter by component because statics workbooks do not include a component column")
+        out = out[out["component"].astype(str).str.upper() == component.upper()]
+    if phase is not None:
+        if "phase" not in out.columns:
+            raise ValueError("Cannot filter by phase because statics workbooks do not include a phase column")
+        out = out[out["phase"].astype(str).str.upper() == phase.upper()]
+    if out.empty:
+        filters = []
+        if component is not None:
+            filters.append(f"component={component.upper()}")
+        if phase is not None:
+            filters.append(f"phase={phase.upper()}")
+        filter_text = f" matching {', '.join(filters)}" if filters else ""
+        raise FileNotFoundError(f"No statics rows found in {statics_dir}{filter_text}")
     return out
 
 
@@ -231,8 +277,11 @@ def plot_statics_by_station(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot all radial S-wave statics by station.")
+    parser = argparse.ArgumentParser(description="Plot component/phase statics by station.")
     parser.add_argument("--statics-dir", type=Path, default=DEFAULT_STATICS_DIR)
+    parser.add_argument("--component", choices=("Z", "R", "T"), default=None)
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_FILE)
+    parser.add_argument("--phase", default=None)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--summary-output", type=Path, default=None)
     parser.add_argument("--station-output", type=Path, default=None)
@@ -242,16 +291,22 @@ def main() -> None:
     args = parser.parse_args()
 
     statics_dir = args.statics_dir
-    output_file = args.output or (statics_dir / "radial_s_statics_by_station.png")
-    summary_file = args.summary_output or (statics_dir / "radial_s_static_baseline_summary.xlsx")
-    station_file = args.station_output or (statics_dir / "radial_s_station_statics.xlsx")
-    event_file = args.event_output or (statics_dir / "radial_s_event_baseline_shifts.xlsx")
+    config = read_run_config(args.config)
+    component = args.component.upper() if args.component else default_component_from_config(config, args.config)
+    phase = args.phase.upper() if args.phase else default_phase_from_config(config)
+    component_name = COMPONENT_LABELS[component]
+    file_prefix = f"{component.lower()}_{phase.lower()}"
+    title_prefix = f"{component_name} {phase}-wave statics"
+    output_file = args.output or (statics_dir / f"{file_prefix}_statics_by_station.png")
+    summary_file = args.summary_output or (statics_dir / f"{file_prefix}_static_baseline_summary.xlsx")
+    station_file = args.station_output or (statics_dir / f"{file_prefix}_station_statics.xlsx")
+    event_file = args.event_output or (statics_dir / f"{file_prefix}_event_baseline_shifts.xlsx")
     corrected_plot_file = args.corrected_output or (
-        statics_dir / "radial_s_event_baseline_corrected_statics_by_station.png"
+        statics_dir / f"{file_prefix}_event_baseline_corrected_statics_by_station.png"
     )
 
-    df = load_statics(statics_dir)
-    plot_statics_by_station(df, output_file)
+    df = load_statics(statics_dir, component=component, phase=phase)
+    plot_statics_by_station(df, output_file, title_prefix=title_prefix)
     corrected, event_baselines = compute_event_baselines(df, args.mad_threshold)
     station_medians = compute_station_medians(corrected, args.mad_threshold)
     write_static_summary_workbook(corrected, event_baselines, station_medians, summary_file)
@@ -262,8 +317,9 @@ def main() -> None:
         corrected_plot_file,
         y_column=CORRECTED_STATIC_COLUMN,
         y_label="Event-baseline-corrected static (s)",
-        title_prefix="Event-baseline-corrected radial S-wave statics",
+        title_prefix=f"Event-baseline-corrected {title_prefix.lower()}",
     )
+    print(f"Using component={component}, phase={phase}")
     print(f"Wrote {output_file} from {len(df)} statics in {df['event_id'].nunique()} events")
     print(f"Wrote {summary_file}")
     print(f"Wrote {station_file}")

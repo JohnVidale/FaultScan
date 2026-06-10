@@ -355,7 +355,7 @@ class AlignStackSmokeTests(unittest.TestCase):
     def test_write_radial_s_wave_time_shifts_saves_residual_excel(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(self.mod, "path_prefix", f"{tmp}/"):
-                out = self.mod.write_radial_s_wave_time_shifts(
+                out = self.mod.write_component_phase_time_shifts(
                     save_dir=Path(tmp) / "event_plots",
                     eve_id="EV1",
                     plot_comp="R",
@@ -384,6 +384,30 @@ class AlignStackSmokeTests(unittest.TestCase):
         self.assertAlmostEqual(df.loc[1, "shift_relative_to_predicted_seconds"], 0.07)
         self.assertTrue(bool(df.loc[0, "passed_window_correlation"]))
         self.assertFalse(bool(df.loc[1, "passed_window_correlation"]))
+
+    def test_write_component_phase_time_shifts_supports_transverse_and_vertical(self):
+        for component in ("T", "Z"):
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as tmp:
+                with patch.object(self.mod, "path_prefix", f"{tmp}/"):
+                    out = self.mod.write_component_phase_time_shifts(
+                        save_dir=Path(tmp) / "event_plots",
+                        eve_id="EV1",
+                        plot_comp=component,
+                        align_phase_name="S",
+                        station_shifts={"1": {"lag_samples": 2, "lag_seconds": 0.02}},
+                        calc_shifts={"1": 0.01},
+                        station_corr={"1": 0.9},
+                        pass_window_ids={"1"},
+                        sample_rate=100.0,
+                        min_freq_hz=3.0,
+                        max_freq_hz=10.0,
+                    )
+
+                self.assertIsNotNone(out)
+                self.assertEqual(out.name, f"EV1_{component}_S_3-10Hz_xcorr_statics.xlsx")
+                df = pd.read_excel(out)
+                self.assertEqual(df.loc[0, "component"], component)
+                self.assertEqual(df.loc[0, "phase"], "S")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Static Corrections Summary</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17212f;
+      --muted: #647084;
+      --line: #d8dee8;
+      --panel: #f7f9fc;
+      --accent: #0f766e;
+      --accent-soft: #dff4f0;
+      --warn: #9a3412;
+      --warn-soft: #fff0df;
+      --code: #263244;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #ffffff;
+      line-height: 1.5;
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 24px 56px;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 22px;
+      margin-bottom: 28px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 32px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 34px 0 12px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      color: var(--code);
+      background: #eef2f7;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 0.94em;
+    }
+
+    .lede {
+      max-width: 920px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .status {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 22px 0 0;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: var(--panel);
+    }
+
+    .metric .label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 4px;
+    }
+
+    .metric .value {
+      display: block;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .note {
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      padding: 13px 15px;
+      margin: 18px 0;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+      background: var(--warn-soft);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .plot {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .plot img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .caption {
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 13px;
+      border-top: 1px solid var(--line);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      padding: 9px 8px;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 700;
+    }
+
+    ul {
+      margin: 8px 0 0 20px;
+      padding: 0;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    .path {
+      word-break: break-all;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 860px) {
+      main {
+        padding: 24px 16px 42px;
+      }
+
+      .status,
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Static Corrections Summary</h1>
+      <p class="lede">
+        This page explains the station-static products generated from the S-wave alignment runs.
+        The current run configuration uses the transverse component <code>T</code>, and the plotter now reads
+        that value from <code>rp_input.json</code> unless a command-line component is supplied.
+      </p>
+      <div class="status">
+        <div class="metric">
+          <span class="label">Events</span>
+          <span class="value">40</span>
+        </div>
+        <div class="metric">
+          <span class="label">Stations</span>
+          <span class="value">289</span>
+        </div>
+        <div class="metric">
+          <span class="label">Statics Per Component</span>
+          <span class="value">11,560</span>
+        </div>
+        <div class="metric">
+          <span class="label">Band</span>
+          <span class="value">3-10 Hz</span>
+        </div>
+      </div>
+    </header>
+
+    <section>
+      <h2>What The Pipeline Does</h2>
+      <div class="grid">
+        <div class="panel">
+          <h3><code>align_stack.py</code></h3>
+          <p>
+            For each event, the alignment code measures a station shift by cross-correlating each station
+            against the selected reference timing. It writes one Excel workbook per event/component/phase:
+            <code>EVENT_COMPONENT_PHASE_3-10Hz_xcorr_statics.xlsx</code>.
+          </p>
+          <p>
+            Each workbook row is one station and includes the measured lag, predicted shift,
+            residual static, window correlation, and pass/fail flag.
+          </p>
+        </div>
+        <div class="panel">
+          <h3><code>plot_statics_by_station.py</code></h3>
+          <p>
+            The plotting script loads the matching statics rows, filters by component and phase,
+            plots all event-by-station values, computes robust event baselines, and writes station median
+            summaries after baseline correction.
+          </p>
+          <p>
+            Plain <code>python plot_statics_by_station.py</code> now uses the component from
+            <code>rp_input.json</code>. Use <code>--component R</code>, <code>--component T</code>,
+            or <code>--component Z</code> only when you want to override the JSON file.
+          </p>
+        </div>
+      </div>
+
+      <div class="note warning">
+        The earlier R-labeled plot happened because the plotter had its own default of <code>R</code>.
+        The alignment run had produced <code>T</code> statics, but the plotter was still selecting and labeling
+        the existing <code>R</code> statics unless <code>--component T</code> was passed.
+      </div>
+    </section>
+
+    <section>
+      <h2>How To Read The Plots</h2>
+      <ul>
+        <li>Each black or red point is one station static from one event.</li>
+        <li>Red points failed the correlation-window threshold; black points passed.</li>
+        <li>The blue underscore is the raw station median in the uncorrected plot.</li>
+        <li>The corrected plot subtracts a robust event baseline before recomputing station behavior.</li>
+        <li>The station spreadsheet is the cleaner product for static corrections because it uses event-baseline correction and MAD outlier filtering.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Transverse Result</h2>
+      <div class="grid">
+        <div class="plot">
+          <img src="statics_results_assets/t_s_statics_by_station.png" alt="Transverse S-wave statics by station">
+          <div class="caption">Raw transverse S-wave statics by station.</div>
+        </div>
+        <div class="plot">
+          <img src="statics_results_assets/t_s_event_baseline_corrected_statics_by_station.png" alt="Event-baseline-corrected transverse S-wave statics by station">
+          <div class="caption">Transverse S-wave statics after subtracting the robust event baseline.</div>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Quantity</th>
+            <th>Transverse S</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Station median static range</td>
+            <td>-0.0754 to 0.1179 s</td>
+          </tr>
+          <tr>
+            <td>Median of station medians</td>
+            <td>0.00144 s</td>
+          </tr>
+          <tr>
+            <td>Median robust station scatter</td>
+            <td>0.00516 s</td>
+          </tr>
+          <tr>
+            <td>Correlation-window pass fraction</td>
+            <td>88.9%</td>
+          </tr>
+          <tr>
+            <td>Largest absolute station medians</td>
+            <td>Stations 118, 170, 252, 119, and 92</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Radial Comparison</h2>
+      <div class="grid">
+        <div class="plot">
+          <img src="statics_results_assets/r_s_statics_by_station.png" alt="Radial S-wave statics by station">
+          <div class="caption">Raw radial S-wave statics by station.</div>
+        </div>
+        <div class="plot">
+          <img src="statics_results_assets/r_s_event_baseline_corrected_statics_by_station.png" alt="Event-baseline-corrected radial S-wave statics by station">
+          <div class="caption">Radial S-wave statics after subtracting the robust event baseline.</div>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Quantity</th>
+            <th>Radial S</th>
+            <th>Transverse S</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Station median range</td>
+            <td>-0.0394 to 0.0394 s</td>
+            <td>-0.0754 to 0.1179 s</td>
+          </tr>
+          <tr>
+            <td>Median robust station scatter</td>
+            <td>0.00345 s</td>
+            <td>0.00516 s</td>
+          </tr>
+          <tr>
+            <td>Pass fraction</td>
+            <td>91.3%</td>
+            <td>88.9%</td>
+          </tr>
+          <tr>
+            <td>R/T station-median comparison</td>
+            <td colspan="2">289 common stations; max absolute difference 0.1216 s; median absolute difference 0.0127 s; correlation 0.008.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Files</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Path</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>T station medians</td>
+            <td class="path">/Users/jvidale/Documents/Research/FaultScanR/output/Statics/t_s_station_statics.xlsx</td>
+          </tr>
+          <tr>
+            <td>T event baselines</td>
+            <td class="path">/Users/jvidale/Documents/Research/FaultScanR/output/Statics/t_s_event_baseline_shifts.xlsx</td>
+          </tr>
+          <tr>
+            <td>T full workbook</td>
+            <td class="path">/Users/jvidale/Documents/Research/FaultScanR/output/Statics/t_s_static_baseline_summary.xlsx</td>
+          </tr>
+          <tr>
+            <td>R station medians</td>
+            <td class="path">/Users/jvidale/Documents/Research/FaultScanR/output/Statics/r_s_station_statics.xlsx</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

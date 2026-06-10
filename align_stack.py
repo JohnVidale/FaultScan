@@ -196,9 +196,10 @@ except Exception as e:
 model = TauPyModel(model="iasp91")
 
 
-def write_run_parameter_snapshot(output_dir: Path) -> Path:
+def write_run_parameter_snapshot(output_dir: Path | str) -> Path:
     """Write a timestamped JSON snapshot of run parameters for reproducibility."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-2]
+    output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     root_path = Path(path_prefix)
@@ -620,7 +621,7 @@ def plot_estimated_vs_calculated_shifts(
     print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
 
 
-def write_radial_s_wave_time_shifts(
+def write_component_phase_time_shifts(
     save_dir: Path,
     eve_id: str,
     plot_comp: str,
@@ -633,9 +634,9 @@ def write_radial_s_wave_time_shifts(
     min_freq_hz: float,
     max_freq_hz: float,
 ) -> Path | None:
-    """Save radial S-wave cross-correlation shifts relative to predicted arrivals."""
-    if plot_comp.upper() != "R" or align_phase_name.upper() != "S":
-        return None
+    """Save component/phase cross-correlation shifts relative to predicted arrivals."""
+    component_name = plot_comp.upper()
+    phase_name = align_phase_name.upper()
 
     def station_sort_key(station_id: str):
         try:
@@ -645,7 +646,13 @@ def write_radial_s_wave_time_shifts(
 
     rows = []
     for station_id in sorted(station_shifts.keys(), key=station_sort_key):
-        measured_shift = float(station_shifts[station_id]["lag_seconds"])
+        station_shift = station_shifts[station_id]
+        if isinstance(station_shift, dict):
+            measured_shift = float(station_shift["lag_seconds"])
+            lag_samples = station_shift.get("lag_samples", np.nan)
+        else:
+            measured_shift = float(station_shift)
+            lag_samples = np.nan
         predicted_shift = calc_shifts.get(station_id)
         predicted_shift = float(predicted_shift) if predicted_shift is not None else np.nan
         residual_shift = measured_shift - predicted_shift if np.isfinite(predicted_shift) else np.nan
@@ -654,10 +661,10 @@ def write_radial_s_wave_time_shifts(
             {
                 "event_id": eve_id,
                 "station": station_id,
-                "component": plot_comp,
-                "phase": align_phase_name.upper(),
+                "component": component_name,
+                "phase": phase_name,
                 "sample_rate_hz": float(sample_rate),
-                "lag_samples": int(station_shifts[station_id]["lag_samples"]),
+                "lag_samples": int(lag_samples) if np.isfinite(lag_samples) else np.nan,
                 "xcorr_shift_seconds": measured_shift,
                 "predicted_shift_seconds": predicted_shift,
                 "shift_relative_to_predicted_seconds": residual_shift,
@@ -667,17 +674,22 @@ def write_radial_s_wave_time_shifts(
         )
 
     if not rows:
-        print("[WARN] No radial S-wave station shifts available to save.")
+        print(f"[WARN] No {component_name} {phase_name}-wave station shifts available to save.")
         return None
 
     statics_dir = Path(path_prefix + "output") / "Statics"
     statics_dir.mkdir(parents=True, exist_ok=True)
 
     freq_label = f"{min_freq_hz:g}-{max_freq_hz:g}Hz".replace(".", "p")
-    out_file = statics_dir / f"{eve_id}_R_S_{freq_label}_xcorr_statics.xlsx"
+    out_file = statics_dir / f"{eve_id}_{component_name}_{phase_name}_{freq_label}_xcorr_statics.xlsx"
     pd.DataFrame(rows).to_excel(out_file, index=False)
-    print(f"✓ Radial S-wave statics saved to: {out_file}")
+    print(f"✓ {component_name} {phase_name}-wave statics saved to: {out_file}")
     return out_file
+
+
+def write_radial_s_wave_time_shifts(*args, **kwargs) -> Path | None:
+    """Backward-compatible wrapper for component/phase statics export."""
+    return write_component_phase_time_shifts(*args, **kwargs)
 
 
 def plot_snippet_comparison(
@@ -2439,7 +2451,7 @@ def run_pipeline() -> None:
             )
             pass_window_ids_for_event = pass_window_ids
 
-            write_radial_s_wave_time_shifts(
+            write_component_phase_time_shifts(
                 save_dir=save_dir,
                 eve_id=eve_id,
                 plot_comp=plot_comp,
