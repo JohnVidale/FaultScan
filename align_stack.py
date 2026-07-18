@@ -75,9 +75,6 @@ snippets_root = Path(path_prefix + f"Sgrams/Snippets_{analysis_hz}Hz")
 event       = "CI_40353544" # Single run selection (used when the corresponding "all_*" is False)
 # event       = "CI_40353664" # Single run selection (used when the corresponding "all_*" is False)
 events = [event]        # Allows for future modification to process multiple events
-event_lat_override: float | None = None
-event_lon_override: float | None = None
-event_depth_override: float | None = None
 
 # plotting options (user-facing)
 show_individual_seismograms = False  # Plot individual seismograms (20 traces/plot, 5 panels/figure)
@@ -95,7 +92,6 @@ def apply_input_config(config_file: Path) -> None:
     global data_path, event, events
     global analysis_hz, input_mode
     global snippets_root
-    global event_lat_override, event_lon_override, event_depth_override
     global show_individual_seismograms, show_record_section_plot
 
     def parse_sampling_hz(value, default_hz: int) -> int:
@@ -151,23 +147,6 @@ def apply_input_config(config_file: Path) -> None:
     if events:
         event = events[0]
 
-    lat_cfg = cfg.get("event_lat")
-    lon_cfg = cfg.get("event_lon")
-    depth_cfg = cfg.get("event_depth")
-    if lat_cfg is not None or lon_cfg is not None or depth_cfg is not None:
-        if lat_cfg is None or lon_cfg is None or depth_cfg is None:
-            print(
-                "[WARN] Event location override requires event_lat, event_lon, "
-                "and event_depth; using catalog location."
-            )
-            event_lat_override = None
-            event_lon_override = None
-            event_depth_override = None
-        else:
-            event_lat_override = float(lat_cfg)
-            event_lon_override = float(lon_cfg)
-            event_depth_override = float(depth_cfg)
-
     data_path = Path(path_prefix + f"Sgrams/20220930_{analysis_hz}Hz")
     snippets_root = Path(path_prefix + f"Sgrams/Snippets_{analysis_hz}Hz")
 
@@ -196,10 +175,9 @@ except Exception as e:
 model = TauPyModel(model="iasp91")
 
 
-def write_run_parameter_snapshot(output_dir: Path | str) -> Path:
+def write_run_parameter_snapshot(output_dir: Path) -> Path:
     """Write a timestamped JSON snapshot of run parameters for reproducibility."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-2]
-    output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     root_path = Path(path_prefix)
@@ -231,9 +209,6 @@ def write_run_parameter_snapshot(output_dir: Path | str) -> Path:
         "data_path": _snapshot_path(data_path),
         "snippets_root": _snapshot_path(snippets_root),
         "events": list(events),
-        "event_lat_override": event_lat_override,
-        "event_lon_override": event_lon_override,
-        "event_depth_override": event_depth_override,
         "show_individual_seismograms": show_individual_seismograms,
         "show_record_section_plot": show_record_section_plot,
     }
@@ -264,27 +239,6 @@ def get_run_event_output_dir(eve_id: str) -> Path:
     event_dir = RUN_OUTPUT_DIR / eve_id  # type: ignore[union-attr]
     event_dir.mkdir(parents=True, exist_ok=True)
     return event_dir
-
-
-def apply_event_location_override(
-    event_depth: float,
-    eve_lat: float,
-    eve_lon: float,
-) -> tuple[float, float, float]:
-    """Return configured event lat/lon/depth overrides when all are supplied."""
-    if (
-        event_lat_override is None
-        or event_lon_override is None
-        or event_depth_override is None
-    ):
-        return event_depth, eve_lat, eve_lon
-
-    print(
-        "Using event location override from rp_input.json: "
-        f"lat={event_lat_override:.6f}, lon={event_lon_override:.6f}, "
-        f"depth={event_depth_override:.3f} km"
-    )
-    return event_depth_override, event_lat_override, event_lon_override
 
 # ===================== Helper functions =====================
 
@@ -408,7 +362,7 @@ def plot_record_section_and_stack(
     try:
         if t_ref is not None:
             for axi in (ax, ax2):
-                axi.axvline(x=t_ref, color="k", lw=3, alpha=0.5, zorder=6)
+                axi.axvline(x=t_ref, color="g", lw=3, alpha=0.5, zorder=6)
     except Exception as e:
         print(f"    [WARN] Failed to draw vertical reference arrival for {align_phase_name}: {e}")
 
@@ -430,7 +384,7 @@ def plot_record_section_and_stack(
     try:
         legend_handles = [
             Line2D([0], [0], color="y", lw=2, label="Correlation window"),
-            Line2D([0], [0], color="g", lw=2, label="Correlation search (±move_limit_sec)"),
+            Line2D([0], [0], color="tab:blue", lw=2, label="Correlation search (±move_limit_sec)"),
             Line2D([0], [0], color="none", label=f"Pass r_win: {n_pass_window}"),
         ]
         ax.legend(
@@ -477,6 +431,18 @@ def plot_three_component_log_envelope(
     """Plot and save log10 RMS envelope for combined three-component stacks."""
     try:
         if all(comp in stack_by_comp for comp in comp_order):
+            plot_mask = mask
+            plot_start = start_time
+            plot_end = end_time
+            if not np.any(plot_mask):
+                print(
+                    "[WARN] Requested plotting window has no samples; "
+                    "using full available time range for 3-comp envelope."
+                )
+                plot_mask = np.ones_like(t_abs, dtype=bool)
+                plot_start = float(t_abs[0])
+                plot_end = float(t_abs[-1])
+
             z = stack_by_comp["DPZ"]
             r = stack_by_comp["R"]
             t = stack_by_comp["T"]
@@ -494,8 +460,8 @@ def plot_three_component_log_envelope(
 
             fig_env, ax_env = plt.subplots(figsize=(12, 4.5))
             set_figure_title(fig_env, f"{eve_id} 3-comp log10 envelope")
-            ax_env.plot(t_abs[mask], log_env[mask], color="k", lw=1.5)
-            ax_env.set_xlim(start_time, end_time)
+            ax_env.plot(t_abs[plot_mask], log_env[plot_mask], color="k", lw=1.5)
+            ax_env.set_xlim(plot_start, plot_end)
             ax_env.set_xlabel("Time since origin (s)", fontsize=11)
             ax_env.set_ylabel("log10 envelope", fontsize=11)
             ax_env.set_title(
@@ -504,7 +470,7 @@ def plot_three_component_log_envelope(
                 fontweight="bold",
             )
             ax_env.grid(alpha=0.2)
-            add_catalog_event_lines(ax_env, origin_env, catalog_df, start_time, end_time)
+            add_catalog_event_lines(ax_env, origin_env, catalog_df, plot_start, plot_end)
             fig_env.subplots_adjust(bottom=0.28)
 
             if origin_env is not None:
@@ -539,6 +505,18 @@ def plot_single_trace_log_envelope(
     if num_traces != 1:
         return
     try:
+        plot_mask = mask
+        plot_start = start_time
+        plot_end = end_time
+        if not np.any(plot_mask):
+            print(
+                "[WARN] Requested plotting window has no samples; "
+                "using full available time range for single-trace envelope."
+            )
+            plot_mask = np.ones_like(t_abs, dtype=bool)
+            plot_start = float(t_abs[0])
+            plot_end = float(t_abs[-1])
+
         env = np.abs(cast(np.ndarray, hilbert(stack_vec)))
         std_sec = 1.0
         std_samples = max(1.0, float(sample_rate) * std_sec)
@@ -550,8 +528,8 @@ def plot_single_trace_log_envelope(
 
         fig_env, ax_env = plt.subplots(figsize=(12, 4.5))
         set_figure_title(fig_env, f"{eve_id} {plot_comp} log10 envelope")
-        ax_env.plot(t_abs[mask], log_env[mask], color="k", lw=1.5)
-        ax_env.set_xlim(start_time, end_time)
+        ax_env.plot(t_abs[plot_mask], log_env[plot_mask], color="k", lw=1.5)
+        ax_env.set_xlim(plot_start, plot_end)
         ax_env.set_xlabel("Time since origin (s)", fontsize=11)
         ax_env.set_ylabel("log10 envelope", fontsize=11)
         ax_env.set_title(
@@ -560,7 +538,7 @@ def plot_single_trace_log_envelope(
             fontweight="bold",
         )
         ax_env.grid(alpha=0.2)
-        add_catalog_event_lines(ax_env, origin, catalog_df, start_time, end_time)
+        add_catalog_event_lines(ax_env, origin, catalog_df, plot_start, plot_end)
         fig_env.subplots_adjust(bottom=0.28)
 
         if origin is not None:
@@ -619,77 +597,6 @@ def plot_estimated_vs_calculated_shifts(
     estcalc_file = save_dir / f"{eve_id}_{plot_comp}_est_vs_calc_shift_{align_phase_name}.png"
     fig_ec.savefig(estcalc_file, dpi=300, bbox_inches="tight")
     print(f"✓ Estimated vs calculated shift plot saved to: {estcalc_file}")
-
-
-def write_component_phase_time_shifts(
-    save_dir: Path,
-    eve_id: str,
-    plot_comp: str,
-    align_phase_name: str,
-    station_shifts: dict,
-    calc_shifts: dict,
-    station_corr: dict,
-    pass_window_ids: set,
-    sample_rate: float,
-    min_freq_hz: float,
-    max_freq_hz: float,
-) -> Path | None:
-    """Save component/phase cross-correlation shifts relative to predicted arrivals."""
-    component_name = plot_comp.upper()
-    phase_name = align_phase_name.upper()
-
-    def station_sort_key(station_id: str):
-        try:
-            return (0, int(station_id))
-        except ValueError:
-            return (1, station_id)
-
-    rows = []
-    for station_id in sorted(station_shifts.keys(), key=station_sort_key):
-        station_shift = station_shifts[station_id]
-        if isinstance(station_shift, dict):
-            measured_shift = float(station_shift["lag_seconds"])
-            lag_samples = station_shift.get("lag_samples", np.nan)
-        else:
-            measured_shift = float(station_shift)
-            lag_samples = np.nan
-        predicted_shift = calc_shifts.get(station_id)
-        predicted_shift = float(predicted_shift) if predicted_shift is not None else np.nan
-        residual_shift = measured_shift - predicted_shift if np.isfinite(predicted_shift) else np.nan
-
-        rows.append(
-            {
-                "event_id": eve_id,
-                "station": station_id,
-                "component": component_name,
-                "phase": phase_name,
-                "sample_rate_hz": float(sample_rate),
-                "lag_samples": int(lag_samples) if np.isfinite(lag_samples) else np.nan,
-                "xcorr_shift_seconds": measured_shift,
-                "predicted_shift_seconds": predicted_shift,
-                "shift_relative_to_predicted_seconds": residual_shift,
-                "window_correlation": float(station_corr.get(station_id, np.nan)),
-                "passed_window_correlation": station_id in pass_window_ids,
-            }
-        )
-
-    if not rows:
-        print(f"[WARN] No {component_name} {phase_name}-wave station shifts available to save.")
-        return None
-
-    statics_dir = Path(path_prefix + "output") / "Statics"
-    statics_dir.mkdir(parents=True, exist_ok=True)
-
-    freq_label = f"{min_freq_hz:g}-{max_freq_hz:g}Hz".replace(".", "p")
-    out_file = statics_dir / f"{eve_id}_{component_name}_{phase_name}_{freq_label}_xcorr_statics.xlsx"
-    pd.DataFrame(rows).to_excel(out_file, index=False)
-    print(f"✓ {component_name} {phase_name}-wave statics saved to: {out_file}")
-    return out_file
-
-
-def write_radial_s_wave_time_shifts(*args, **kwargs) -> Path | None:
-    """Backward-compatible wrapper for component/phase statics export."""
-    return write_component_phase_time_shifts(*args, **kwargs)
 
 
 def plot_snippet_comparison(
@@ -811,6 +718,7 @@ def plot_individual_seismograms_single_component(
     sample_rate: float,
     move_limit_sec: float,
     npts: int,
+    t_ref,
     eve_id: str,
     plot_comp: str,
     align_phase_name: str,
@@ -820,6 +728,14 @@ def plot_individual_seismograms_single_component(
     if not show_individual_seismograms:
         return
     try:
+        plot_mask = mask
+        if not np.any(plot_mask):
+            print(
+                "[WARN] Requested plotting window has no samples; "
+                "using full available time range for individual seismograms."
+            )
+            plot_mask = np.ones_like(t_abs, dtype=bool)
+
         all_rows = selected_rows + rejected_rows
         all_rows.sort(key=lambda t: int(t[1]))
 
@@ -864,21 +780,24 @@ def plot_individual_seismograms_single_component(
                 t_explore_end = min(start_time + (npts / sample_rate), t_win_end + move_limit_sec)
                 axp.axvline(x=t_win_start, color="y", lw=1.2, alpha=0.9)
                 axp.axvline(x=t_win_end, color="y", lw=1.2, alpha=0.9)
-                axp.axvline(x=t_explore_start, color="g", lw=1.2, alpha=0.9)
-                axp.axvline(x=t_explore_end, color="g", lw=1.2, alpha=0.9)
+                axp.axvline(x=t_explore_start, color="tab:blue", lw=1.2, alpha=0.9)
+                axp.axvline(x=t_explore_end, color="tab:blue", lw=1.2, alpha=0.9)
+                if t_ref is not None:
+                    axp.axvline(x=t_ref, color="g", lw=1.4, alpha=0.8, linestyle="--", zorder=6)
 
-                for idx_in_subset, (_, station_id, y) in enumerate(subset):
+                for idx_in_subset, row in enumerate(subset):
+                    _, station_id, y = row[:3]
                     i = (len(subset) - 1) - idx_in_subset
                     passed_win = station_id in pass_window_ids
                     trace_color = "k" if passed_win else "red"
                     axp.plot(
-                        t_abs[mask],
-                        y[mask] + i,
+                        t_abs[plot_mask],
+                        y[plot_mask] + i,
                         color=trace_color,
                         lw=0.7,
                     )
                     axp.text(
-                        t_abs[mask][0],
+                        t_abs[plot_mask][0],
                         i,
                         station_id,
                         fontsize=6,
@@ -887,8 +806,8 @@ def plot_individual_seismograms_single_component(
 
                 ref_offset = len(subset) + 1
                 axp.plot(
-                    t_abs[mask],
-                    stack_vec[mask] + ref_offset,
+                    t_abs[plot_mask],
+                    stack_vec[plot_mask] + ref_offset,
                     color="C3",
                     lw=1.2,
                 )
@@ -1030,11 +949,19 @@ def plot_individual_seismograms_three_components(
             all_rows = sorted(all_rows, key=lambda t: int(t[1]))
             t_abs = data["t_abs"]
             mask = data["mask"]
+            plot_mask = mask
+            if not np.any(plot_mask):
+                print(
+                    f"[WARN] Requested plotting window has no samples for {comp_title}; "
+                    "using full available time range for individual seismograms."
+                )
+                plot_mask = np.ones_like(t_abs, dtype=bool)
             sample_rate = data["sample_rate"]
             win_start = data["win_start"]
             win_end = data["win_end"]
             move_limit_sec = data["move_limit_sec"]
             npts = data["npts"]
+            t_ref = data.get("t_ref")
 
             n_traces = len(all_rows)
             if n_traces == 0:
@@ -1077,21 +1004,24 @@ def plot_individual_seismograms_three_components(
                     t_explore_end = min(start_time + (npts / sample_rate), t_win_end + move_limit_sec)
                     axp.axvline(x=t_win_start, color="y", lw=1.2, alpha=0.9)
                     axp.axvline(x=t_win_end, color="y", lw=1.2, alpha=0.9)
-                    axp.axvline(x=t_explore_start, color="g", lw=1.2, alpha=0.9)
-                    axp.axvline(x=t_explore_end, color="g", lw=1.2, alpha=0.9)
+                    axp.axvline(x=t_explore_start, color="tab:blue", lw=1.2, alpha=0.9)
+                    axp.axvline(x=t_explore_end, color="tab:blue", lw=1.2, alpha=0.9)
+                    if t_ref is not None:
+                        axp.axvline(x=t_ref, color="g", lw=1.4, alpha=0.8, linestyle="--", zorder=6)
 
-                    for idx_in_subset, (_, station_id, y) in enumerate(subset):
+                    for idx_in_subset, row in enumerate(subset):
+                        _, station_id, y = row[:3]
                         i = (len(subset) - 1) - idx_in_subset
                         passed_win = station_id in pass_window_ids
                         trace_color = "k" if passed_win else "red"
                         axp.plot(
-                            t_abs[mask],
-                            y[mask] + i,
+                            t_abs[plot_mask],
+                            y[plot_mask] + i,
                             color=trace_color,
                             lw=0.7,
                         )
                         axp.text(
-                            t_abs[mask][0],
+                            t_abs[plot_mask][0],
                             i,
                             station_id,
                             fontsize=6,
@@ -1102,8 +1032,8 @@ def plot_individual_seismograms_three_components(
                     stack_ref = data.get("stack_vec", None)
                     if stack_ref is not None:
                         axp.plot(
-                            t_abs[mask],
-                            stack_ref[mask] + ref_offset,
+                            t_abs[plot_mask],
+                            stack_ref[plot_mask] + ref_offset,
                             color="C3",
                             lw=1.2,
                         )
@@ -1483,7 +1413,7 @@ def render_three_component_panel(
     ax.grid(alpha=0.2)
 
     if t_ref is not None:
-        ax.axvline(x=t_ref, color="r", lw=2, alpha=0.6, linestyle="--", zorder=6)
+        ax.axvline(x=t_ref, color="g", lw=2, alpha=0.6, linestyle="--", zorder=6)
     try:
         draw_correlation_markers(
             ax,
@@ -1502,7 +1432,7 @@ def render_three_component_panel(
             n_pass_window = int(data.get("n_pass_window", 0))
             legend_handles = [
                 Line2D([0], [0], color="y", lw=2, label="Correlation window"),
-                Line2D([0], [0], color="g", lw=2, label="Correlation search (±move_limit_sec)"),
+                Line2D([0], [0], color="tab:blue", lw=2, label="Correlation search (±move_limit_sec)"),
                 Line2D([0], [0], color="none", label=f"Pass r_win: {n_pass_window}"),
             ]
             ax.legend(
@@ -1526,7 +1456,7 @@ def render_three_component_panel(
     ax2.grid(alpha=0.2)
 
     if t_ref is not None:
-        ax2.axvline(x=t_ref, color="r", lw=2, alpha=0.6, linestyle="--", zorder=6)
+        ax2.axvline(x=t_ref, color="g", lw=2, alpha=0.6, linestyle="--", zorder=6)
     try:
         draw_correlation_markers(
             ax2,
@@ -1741,6 +1671,7 @@ def plot_single_component_products(
     selected_rows: list,
     rejected_rows: list,
     npts: int,
+    t_ref,
     aligned_traces_by_station: dict,
     name2ll: dict,
 ) -> None:
@@ -1803,6 +1734,7 @@ def plot_single_component_products(
         sample_rate=sample_rate,
         move_limit_sec=move_limit_sec,
         npts=npts,
+        t_ref=t_ref,
         eve_id=eve_id,
         plot_comp=plot_comp,
         align_phase_name=align_phase_name,
@@ -1859,6 +1791,157 @@ def print_three_component_banner() -> None:
     print(f"\n{'='*70}")
     print("Creating combined three-component plot...")
     print(f"{'='*70}\n")
+
+
+def plot_all_events_component_stacks(
+    component_stacks: dict[str, list[tuple[str, np.ndarray, np.ndarray, np.ndarray, dict]]],
+    run_output_dir: Path | None,
+    align_phase_name: str,
+) -> Path | None:
+    """Plot final stacked waveforms for all processed events, grouped by component."""
+    if run_output_dir is None:
+        print("[WARN] Run output directory is not initialized; skipping all-events stack summary plot.")
+        return None
+    if not component_stacks:
+        print("[WARN] No component stacks were collected; skipping all-events stack summary plot.")
+        return None
+
+    comp_keys = sorted(component_stacks.keys())
+    fig_h = max(3.0, 3.2 * len(comp_keys))
+    fig, axes = plt.subplots(len(comp_keys), 1, figsize=(12, fig_h), sharex=False)
+    set_figure_title(fig, "All events component stacks")
+    if len(comp_keys) == 1:
+        axes = [axes]
+
+    for idx, comp_name in enumerate(comp_keys):
+        ax = axes[idx]
+        series = component_stacks.get(comp_name, [])
+        if len(series) == 0:
+            ax.set_axis_off()
+            continue
+
+        for eve_id, t_abs, mask, stack_vec, _meta in series:
+            plot_mask = mask
+            if not np.any(plot_mask):
+                plot_mask = np.ones_like(t_abs, dtype=bool)
+            y = stack_vec[plot_mask]
+            ymax = float(np.max(np.abs(y))) if y.size > 0 else 0.0
+            if ymax > 0:
+                y = y / ymax
+            ax.plot(t_abs[plot_mask], y, lw=1.2, alpha=0.85, label=eve_id)
+
+        ax.axhline(0.0, color="k", lw=0.6, alpha=0.5)
+        ax.set_ylabel("Norm amp")
+        ax.set_title(f"Component {comp_name} (N={len(series)})", fontsize=11, fontweight="bold")
+        ax.grid(alpha=0.25)
+        if len(series) <= 14:
+            ax.legend(loc="upper right", fontsize=8, ncol=1)
+
+    axes[-1].set_xlabel("Time since origin (s)")
+    fig.suptitle(
+        f"Final stacks by component across events ({align_phase_name})",
+        fontsize=13,
+        fontweight="bold",
+    )
+    plt.tight_layout()
+
+    out_file = run_output_dir / f"all_events_component_stacks_{align_phase_name}.png"
+    fig.savefig(out_file, dpi=300, bbox_inches="tight")
+    print(f"✓ All-events component stack summary saved to: {out_file}")
+    plt.close(fig)
+    return out_file
+
+
+def plot_all_events_component_offsets(
+    component_stacks: dict[str, list[tuple[str, np.ndarray, np.ndarray, np.ndarray, dict]]],
+    run_output_dir: Path | None,
+    align_phase_name: str,
+) -> list[Path]:
+    """Save one plot per component with normalized event stacks vertically offset."""
+    if run_output_dir is None:
+        print("[WARN] Run output directory is not initialized; skipping per-component offset stack plots.")
+        return []
+    if not component_stacks:
+        print("[WARN] No component stacks were collected; skipping per-component offset stack plots.")
+        return []
+
+    out_files: list[Path] = []
+    for comp_name in sorted(component_stacks.keys()):
+        series = component_stacks.get(comp_name, [])
+        if len(series) == 0:
+            continue
+
+        fig_h = max(4.5, 0.35 * len(series) + 2.0)
+        fig, ax = plt.subplots(1, 1, figsize=(12, fig_h))
+        set_figure_title(fig, f"All events {comp_name} offset stacks")
+
+        offsets = np.arange(len(series), dtype=float)
+        for i, (eve_id, t_abs, mask, stack_vec, meta) in enumerate(series):
+            plot_mask = mask
+            if not np.any(plot_mask):
+                plot_mask = np.ones_like(t_abs, dtype=bool)
+            y = stack_vec[plot_mask]
+            ymax = float(np.max(np.abs(y))) if y.size > 0 else 0.0
+            if ymax > 0:
+                y = y / ymax
+            ax.plot(t_abs[plot_mask], y + offsets[i], lw=1.0, color="k")
+
+            # Per-trace timing markers (arrival + correlation window/search bounds).
+            y0 = offsets[i] - 0.42
+            y1 = offsets[i] + 0.42
+            t_ref = meta.get("t_ref")
+            if t_ref is not None:
+                ax.vlines(float(t_ref), y0, y1, color="g", lw=1.1, alpha=0.9, linestyles="--")
+
+            try:
+                t_win_start, t_win_end, t_explore_start, t_explore_end = correlation_time_bounds(
+                    float(meta["start_time"]),
+                    int(meta["win_start"]),
+                    int(meta["win_end"]),
+                    float(meta["sample_rate"]),
+                    float(meta["move_limit_sec"]),
+                    int(meta["npts"]),
+                )
+                ax.vlines(t_win_start, y0, y1, color="y", lw=1.0, alpha=0.9)
+                ax.vlines(t_win_end, y0, y1, color="y", lw=1.0, alpha=0.9)
+                ax.vlines(t_explore_start, y0, y1, color="tab:blue", lw=1.0, alpha=0.9)
+                ax.vlines(t_explore_end, y0, y1, color="tab:blue", lw=1.0, alpha=0.9)
+            except Exception:
+                pass
+
+            # Event id label at right edge for quick visual lookup.
+            if np.any(plot_mask):
+                ax.text(
+                    float(t_abs[plot_mask][-1]),
+                    offsets[i],
+                    f"  {eve_id}",
+                    fontsize=7,
+                    va="center",
+                    ha="left",
+                )
+
+        ax.set_xlabel("Time since origin (s)")
+        ax.set_ylabel("Event index (offset)")
+        ax.set_yticks(offsets)
+        if len(series) <= 30:
+            ax.set_yticklabels([eve_id for eve_id, _, _, _, _ in series], fontsize=7)
+        else:
+            ax.set_yticklabels([str(i + 1) for i in range(len(series))], fontsize=7)
+        ax.grid(alpha=0.2)
+        ax.set_title(
+            f"Component {comp_name}: normalized stacks with vertical offsets (N={len(series)})",
+            fontsize=12,
+            fontweight="bold",
+        )
+
+        plt.tight_layout()
+        out_file = run_output_dir / f"all_events_{comp_name}_offset_stacks_{align_phase_name}.png"
+        fig.savefig(out_file, dpi=300, bbox_inches="tight")
+        print(f"✓ Per-component offset stack plot saved to: {out_file}")
+        plt.close(fig)
+        out_files.append(out_file)
+
+    return out_files
 
 
 def get_event_data_path(eve_id: str) -> Path:
@@ -1941,7 +2024,6 @@ def load_event_context_and_waveforms(
 ):
     """Load event metadata/station lookup and read event waveforms for one channel."""
     event_depth, eve_lat, eve_lon, origin = load_event_metadata(eve_id, info_root)
-    event_depth, eve_lat, eve_lon = apply_event_location_override(event_depth, eve_lat, eve_lon)
     save_dir = get_run_event_output_dir(eve_id)
     name2ll = load_station_lookup(info_root)
     event_data_path = get_event_data_path(eve_id)
@@ -2343,6 +2425,7 @@ def run_pipeline() -> None:
     base_output_root = Path(path_prefix + "output")
     initialize_run_output_dir(base_output_root)
     snapshot_written_dirs: set[Path] = set()
+    component_stacks_by_name: dict[str, list[tuple[str, np.ndarray, np.ndarray, np.ndarray, dict]]] = {}
     # User-facing components: Z, R, T
     channels, process_as_three_comp, sel_comp_list = get_component_selection(
         all_channels, component
@@ -2450,19 +2533,22 @@ def run_pipeline() -> None:
                 t_ref=t_ref,
             )
             pass_window_ids_for_event = pass_window_ids
-
-            write_component_phase_time_shifts(
-                save_dir=save_dir,
-                eve_id=eve_id,
-                plot_comp=plot_comp,
-                align_phase_name=align_phase,
-                station_shifts=station_shifts,
-                calc_shifts=calc_shifts,
-                station_corr=station_corr,
-                pass_window_ids=pass_window_ids,
-                sample_rate=sample_rate,
-                min_freq_hz=min_freq,
-                max_freq_hz=max_freq,
+            component_stacks_by_name.setdefault(plot_comp, []).append(
+                (
+                    eve_id,
+                    t_abs.copy(),
+                    mask.copy(),
+                    stack_vec.copy(),
+                    {
+                        "t_ref": None if t_ref is None else float(t_ref),
+                        "start_time": float(start_time),
+                        "win_start": int(win_start),
+                        "win_end": int(win_end),
+                        "sample_rate": float(sample_rate),
+                        "move_limit_sec": float(move_limit_sec),
+                        "npts": int(npts),
+                    },
+                )
             )
 
             _plot_wall_start, _plot_cpu_start = start_plot_timing()
@@ -2560,6 +2646,7 @@ def run_pipeline() -> None:
                     selected_rows=selected_rows,
                     rejected_rows=rejected_rows,
                     npts=npts,
+                    t_ref=t_ref,
                     aligned_traces_by_station=aligned_traces_by_station,
                     name2ll=name2ll,
                 )
@@ -2634,6 +2721,17 @@ def run_pipeline() -> None:
             )
 
             finalize_three_component_plotting(_plot3_wall_start, _plot3_cpu_start)
+
+    plot_all_events_component_stacks(
+        component_stacks=component_stacks_by_name,
+        run_output_dir=RUN_OUTPUT_DIR,
+        align_phase_name=align_phase,
+    )
+    plot_all_events_component_offsets(
+        component_stacks=component_stacks_by_name,
+        run_output_dir=RUN_OUTPUT_DIR,
+        align_phase_name=align_phase,
+    )
 
 def main() -> None:
     run_pipeline()

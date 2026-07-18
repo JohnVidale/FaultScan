@@ -104,9 +104,15 @@ def build_component_output_payload(
     t_ref,
 ):
     """Create deep-copied component payload used by three-component plotting."""
+    def _copy_row(row: tuple):
+        # Preserve optional unaligned-trace payload when present.
+        if len(row) >= 4:
+            return (row[0], row[1], row[2].copy(), row[3].copy())
+        return (row[0], row[1], row[2].copy())
+
     payload = {
         "fig": record_fig,
-        "all_rows": [(r[0], r[1], r[2].copy()) for r in (selected_rows + rejected_rows)],
+        "all_rows": [_copy_row(r) for r in (selected_rows + rejected_rows)],
         "stack_vec": stack_vec.copy(),
         "t_abs": t_abs.copy(),
         "mask": mask.copy(),
@@ -799,7 +805,7 @@ def compute_stage3_finalized_rows(
     timing_state: TimingState,
 ):
     """Stage 3: align traces on reference timebase and build selected/rejected rows."""
-    selected_rows = []  # (dist_km, station_id, y_aligned_norm)
+    selected_rows = []  # (dist_km, station_id, y_aligned_norm, x_original_norm)
     rejected_rows = []
     aligned_bank = []
     aligned_bank_all = []
@@ -836,6 +842,9 @@ def compute_stage3_finalized_rows(
         my = np.max(np.abs(win)) if win.size > 0 else 1.0
         if my > 0:
             y = y / my
+            x_original = x / my
+        else:
+            x_original = x.copy()
 
         aligned_traces_by_station[station_id] = y.copy()
         aligned_bank_all.append(y)
@@ -845,10 +854,10 @@ def compute_stage3_finalized_rows(
         dist_km = dist_m / 1000.0
 
         if station_id in selected_ids:
-            selected_rows.append((dist_km, station_id, y))
+            selected_rows.append((dist_km, station_id, y, x_original))
             aligned_bank.append(y)
         else:
-            rejected_rows.append((dist_km, station_id, y))
+            rejected_rows.append((dist_km, station_id, y, x_original))
     add_stage_timing(timing_state, "align_stage3_finalize", _stage3_wall_start, _stage3_cpu_start)
 
     selected_rows.sort(key=lambda t: t[0])
@@ -950,14 +959,14 @@ def correlation_time_bounds(start_t, win_start_samp, win_end_samp, samp_rate, mo
 
 
 def draw_correlation_markers(ax, start_t, win_start_samp, win_end_samp, samp_rate, move_sec, npts):
-    """Draw yellow (window) and green (search) vertical bounds on one axis."""
+    """Draw yellow (window) and blue (search) vertical bounds on one axis."""
     t_win_start, t_win_end, t_explore_start, t_explore_end = correlation_time_bounds(
         start_t, win_start_samp, win_end_samp, samp_rate, move_sec, npts
     )
     ax.axvline(x=t_win_start, color="y", lw=2, alpha=0.9, zorder=7)
     ax.axvline(x=t_win_end, color="y", lw=2, alpha=0.9, zorder=7)
-    ax.axvline(x=t_explore_start, color="g", lw=2, alpha=0.9, zorder=7)
-    ax.axvline(x=t_explore_end, color="g", lw=2, alpha=0.9, zorder=7)
+    ax.axvline(x=t_explore_start, color="tab:blue", lw=2, alpha=0.9, zorder=7)
+    ax.axvline(x=t_explore_end, color="tab:blue", lw=2, alpha=0.9, zorder=7)
 
 
 def set_figure_title(fig, title: str) -> None:

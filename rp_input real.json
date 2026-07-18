@@ -2,8 +2,8 @@
   "min_freq":       3.0,
   "max_freq":      10.0,
 
-  "start_time":     4.0,
-  "end_time":       6.0,
+  "start_time":     4.8,
+  "end_time":       5.8,
 
   "win_pre":        0.05,
   "win_post":       0.15,
@@ -13,7 +13,7 @@
 
   "analysis_hz": 250,
 
-  "all_channels": false,
+  "all_channels": true,
   "component": "R",
   "align_phase": "S",
   "verbose": false,
