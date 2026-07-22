@@ -14,6 +14,32 @@ from obspy import UTCDateTime
 from obspy.signal.rotate import rotate_ne_rt
 
 
+REJECTED_STATION_IDS = frozenset(
+    {
+        "00050",
+        "00058",
+        "00074",
+        "00085",
+        "00107",
+        "00154",
+        "00161",
+        "00171",
+        "00179",
+        "00303",
+        "00331",
+    }
+)
+
+
+def is_rejected_station(station_id: str) -> bool:
+    """Return whether a station is excluded from waveform processing."""
+    try:
+        normalized = f"{int(str(station_id)):05d}"
+    except ValueError:
+        normalized = str(station_id)
+    return normalized in REJECTED_STATION_IDS
+
+
 @dataclass
 class TimingState:
     start_cpu_time: float = field(default_factory=time.process_time)
@@ -311,7 +337,6 @@ def read_waveforms_for_event(
     sampling_hz: int,
     start_time: float,
     end_time: float,
-    verbose: bool,
     timing_state: TimingState,
 ):
     """Read (or reuse) windowed traces for an event/channel and return stream + raw limits."""
@@ -334,6 +359,8 @@ def read_waveforms_for_event(
     _read_wall_start = time.perf_counter()
     _read_cpu_start = time.process_time()
     for sta, (slat, slon) in name2ll.items():
+        if is_rejected_station(sta):
+            continue
         code_num = int(sta)
         code_str = f"{code_num:05d}"
         code_3 = f"{code_num % 1000:03d}"
@@ -364,12 +391,7 @@ def read_waveforms_for_event(
                     sampling_hz=sampling_hz,
                 )
 
-            if verbose:
-                if stanum % 20 == 0:
-                    print(f"Reading station {sta} channel {ch_read} from {fpath}")
             if fpath is None or not fpath.exists():
-                if verbose:
-                    print("No such file")
                 continue
 
             st_win = read(
@@ -671,6 +693,7 @@ def compute_stage1_aligned_stack(
     win_end: int,
     move_limit_samples: int,
     calc_shifts: dict,
+    imposed_station_shifts: dict[str, float] | None,
     timing_state: TimingState,
 ) -> np.ndarray:
     """Stage 1: align traces to reference and return normalized stack."""
@@ -685,12 +708,21 @@ def compute_stage1_aligned_stack(
         station_id = str(tr.stats.station)
         if station_id in calc_shifts:
             expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
-            rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
-            lag1 = expected_shift_samples + compute_lag(
-                ref, rolled_expected, win_start, win_end, move_limit_samples
-            )
+            if imposed_station_shifts is not None:
+                lag1 = expected_shift_samples + int(
+                    round(imposed_station_shifts[station_id] * sample_rate)
+                )
+            else:
+                rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
+                lag1 = expected_shift_samples + compute_lag(
+                    ref, rolled_expected, win_start, win_end, move_limit_samples
+                )
         else:
-            lag1 = lag0 + compute_lag(ref, rolled, win_start, win_end, move_limit_samples)
+            lag1 = (
+                int(round(imposed_station_shifts[station_id] * sample_rate))
+                if imposed_station_shifts is not None
+                else lag0 + compute_lag(ref, rolled, win_start, win_end, move_limit_samples)
+            )
 
         aligned_stack += shift_left_zeropad(d, lag1)
     add_stage_timing(timing_state, "align_stage1", _stage1_wall_start, _stage1_cpu_start)
@@ -711,6 +743,7 @@ def compute_stage2_screened_stack(
     win_end: int,
     move_limit_samples: int,
     calc_shifts: dict,
+    imposed_station_shifts: dict[str, float] | None,
     r_window_min: float,
     timing_state: TimingState,
 ):
@@ -734,17 +767,26 @@ def compute_stage2_screened_stack(
 
         if station_id in calc_shifts:
             expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
-            rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
-            lag2 = expected_shift_samples + compute_lag(
-                aligned_stack,
-                rolled_expected,
-                win_start,
-                win_end,
-                move_limit_samples,
-            )
+            if imposed_station_shifts is not None:
+                lag2 = expected_shift_samples + int(
+                    round(imposed_station_shifts[station_id] * sample_rate)
+                )
+            else:
+                rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
+                lag2 = expected_shift_samples + compute_lag(
+                    aligned_stack,
+                    rolled_expected,
+                    win_start,
+                    win_end,
+                    move_limit_samples,
+                )
         else:
-            lag2 = lag0 + compute_lag(
-                aligned_stack, rolled, win_start, win_end, move_limit_samples
+            lag2 = (
+                int(round(imposed_station_shifts[station_id] * sample_rate))
+                if imposed_station_shifts is not None
+                else lag0 + compute_lag(
+                    aligned_stack, rolled, win_start, win_end, move_limit_samples
+                )
             )
 
         aligned_data = shift_left_zeropad(d, lag2)
@@ -794,6 +836,7 @@ def compute_stage3_finalized_rows(
     ref_station_id: str,
     selected_ids: set,
     calc_shifts: dict,
+    imposed_station_shifts: dict[str, float] | None,
     npts: int,
     sample_rate: float,
     win_start: int,
@@ -824,13 +867,22 @@ def compute_stage3_finalized_rows(
         else:
             if station_id in calc_shifts:
                 expected_shift_samples = int(round(calc_shifts[station_id] * sample_rate))
-                x_expected = shift_left_zeropad(x, expected_shift_samples)
-                lag_delta = compute_lag(
-                    ref, x_expected, win_start, win_end, move_limit_samples
-                )
-                lag3 = expected_shift_samples + lag_delta
+                if imposed_station_shifts is not None:
+                    lag3 = expected_shift_samples + int(
+                        round(imposed_station_shifts[station_id] * sample_rate)
+                    )
+                else:
+                    x_expected = shift_left_zeropad(x, expected_shift_samples)
+                    lag_delta = compute_lag(
+                        ref, x_expected, win_start, win_end, move_limit_samples
+                    )
+                    lag3 = expected_shift_samples + lag_delta
             else:
-                lag3 = compute_lag(ref, x, win_start, win_end, move_limit_samples)
+                lag3 = (
+                    int(round(imposed_station_shifts[station_id] * sample_rate))
+                    if imposed_station_shifts is not None
+                    else compute_lag(ref, x, win_start, win_end, move_limit_samples)
+                )
             y = shift_left_zeropad(x, lag3)
 
         station_shifts[station_id] = {

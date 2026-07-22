@@ -16,7 +16,6 @@
   "all_channels": true,
   "component": "R",
   "align_phase": "S",
-  "verbose": false,
   "input_mode": "snippets",
 
   "event_lat":   33.480,

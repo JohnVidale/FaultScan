@@ -10,7 +10,6 @@
   "all_channels": true,
   "component": "R",
   "align_phase": "S",
-  "verbose": false,
   "path_prefix": "/Users/jvidale/Documents/Research/FaultScanR/",
   "info_root": "/Users/jvidale/Documents/Research/FaultScanR/event_sta_info",
   "input_mode": "snippets",

@@ -14,6 +14,7 @@ import pandas as pd
 DEFAULT_STATICS_DIR = Path("/Users/jvidale/Documents/Research/FaultScanR/output/Statics")
 STATIC_COLUMN = "shift_relative_to_predicted_seconds"
 CORRECTED_STATIC_COLUMN = "event_baseline_corrected_static_seconds"
+DEFAULT_REFERENCE_EVENT = "CI_40353472"
 COMPONENT_LABELS = {
     "Z": "Vertical",
     "R": "Radial",
@@ -45,6 +46,12 @@ def default_phase_from_config(config: dict) -> str:
     return str(config.get("align_phase", "S")).upper()
 
 
+def default_catalog_shift_component_from_config(config: dict) -> str | None:
+    """Use the configured R/T catalog-shift basis when one is available."""
+    component = str(config.get("component", "")).upper()
+    return component if component in {"R", "T"} else None
+
+
 def robust_sigma(values: pd.Series) -> float:
     """Estimate scatter as 1.4826 * MAD."""
     x = values.astype(float).to_numpy()
@@ -63,7 +70,12 @@ def station_sort_key(station_id: str):
         return (1, station_id)
 
 
-def load_statics(statics_dir: Path, component: str | None = None, phase: str | None = None) -> pd.DataFrame:
+def load_statics(
+    statics_dir: Path,
+    component: str | None = None,
+    phase: str | None = None,
+    catalog_shift_component: str | None = None,
+) -> pd.DataFrame:
     files = sorted(statics_dir.glob("*_xcorr_statics.xlsx"))
     if not files:
         raise FileNotFoundError(f"No statics workbooks found in {statics_dir}")
@@ -90,12 +102,24 @@ def load_statics(statics_dir: Path, component: str | None = None, phase: str | N
         if "phase" not in out.columns:
             raise ValueError("Cannot filter by phase because statics workbooks do not include a phase column")
         out = out[out["phase"].astype(str).str.upper() == phase.upper()]
+    if catalog_shift_component is not None:
+        if "catalog_shift_component" not in out.columns:
+            raise ValueError(
+                "Cannot filter by catalog shift component because statics workbooks "
+                "do not include a catalog_shift_component column"
+            )
+        out = out[
+            out["catalog_shift_component"].astype(str).str.upper()
+            == catalog_shift_component.upper()
+        ]
     if out.empty:
         filters = []
         if component is not None:
             filters.append(f"component={component.upper()}")
         if phase is not None:
             filters.append(f"phase={phase.upper()}")
+        if catalog_shift_component is not None:
+            filters.append(f"catalog_shift_component={catalog_shift_component.upper()}")
         filter_text = f" matching {', '.join(filters)}" if filters else ""
         raise FileNotFoundError(f"No statics rows found in {statics_dir}{filter_text}")
     return out
@@ -226,6 +250,46 @@ def write_event_baselines_workbook(event_baselines: pd.DataFrame, output_file: P
     event_baselines.to_excel(output_file, index=False)
 
 
+def compute_event_alignment_shifts(
+    event_baselines: pd.DataFrame,
+    reference_event: str,
+) -> pd.DataFrame:
+    """Return baseline-difference shifts that align each event to one reference event."""
+    reference_rows = event_baselines.loc[
+        event_baselines["event_id"].astype(str) == reference_event
+    ]
+    if reference_rows.empty:
+        available = ", ".join(sorted(event_baselines["event_id"].astype(str)))
+        raise ValueError(
+            f"Reference event {reference_event!r} is not available. Available events: {available}"
+        )
+
+    reference = reference_rows.iloc[0]
+    reference_baseline = float(reference["event_baseline_static_seconds"])
+    reference_uncertainty = float(reference["event_baseline_uncertainty_seconds"])
+    shifts = event_baselines.copy()
+    shifts["reference_event_id"] = reference_event
+    shifts["reference_event_baseline_static_seconds"] = reference_baseline
+    shifts["reference_event_baseline_uncertainty_seconds"] = reference_uncertainty
+    shifts["is_reference_event"] = shifts["event_id"].astype(str) == reference_event
+    shifts["time_shift_to_reference_seconds"] = (
+        shifts["event_baseline_static_seconds"] - reference_baseline
+    )
+    shifts["time_shift_uncertainty_seconds"] = np.sqrt(
+        shifts["event_baseline_uncertainty_seconds"] ** 2 + reference_uncertainty**2
+    )
+    shifts.loc[shifts["is_reference_event"], "time_shift_uncertainty_seconds"] = 0.0
+    # Positive is the sample shift used by shift_left_zeropad in the alignment pipeline.
+    shifts["shift_left_to_align_seconds"] = shifts["time_shift_to_reference_seconds"]
+    shifts["shift_right_to_align_seconds"] = -shifts["time_shift_to_reference_seconds"]
+    return shifts.sort_values("event_id").reset_index(drop=True)
+
+
+def write_event_alignment_workbook(alignment_shifts: pd.DataFrame, output_file: Path) -> None:
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    alignment_shifts.to_excel(output_file, index=False)
+
+
 def plot_statics_by_station(
     df: pd.DataFrame,
     output_file: Path,
@@ -282,10 +346,13 @@ def main() -> None:
     parser.add_argument("--component", choices=("Z", "R", "T"), default=None)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_FILE)
     parser.add_argument("--phase", default=None)
+    parser.add_argument("--catalog-shift-component", choices=("R", "T"), default=None)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--summary-output", type=Path, default=None)
     parser.add_argument("--station-output", type=Path, default=None)
     parser.add_argument("--event-output", type=Path, default=None)
+    parser.add_argument("--reference-event", default=DEFAULT_REFERENCE_EVENT)
+    parser.add_argument("--event-alignment-output", type=Path, default=None)
     parser.add_argument("--corrected-output", type=Path, default=None)
     parser.add_argument("--mad-threshold", type=float, default=3.5)
     args = parser.parse_args()
@@ -294,24 +361,43 @@ def main() -> None:
     config = read_run_config(args.config)
     component = args.component.upper() if args.component else default_component_from_config(config, args.config)
     phase = args.phase.upper() if args.phase else default_phase_from_config(config)
+    catalog_shift_component = (
+        args.catalog_shift_component
+        or default_catalog_shift_component_from_config(config)
+    )
     component_name = COMPONENT_LABELS[component]
-    file_prefix = f"{component.lower()}_{phase.lower()}"
+    shift_suffix = (
+        f"_shift{catalog_shift_component.lower()}"
+        if catalog_shift_component
+        else ""
+    )
+    file_prefix = f"{component.lower()}_{phase.lower()}{shift_suffix}"
     title_prefix = f"{component_name} {phase}-wave statics"
     output_file = args.output or (statics_dir / f"{file_prefix}_statics_by_station.png")
     summary_file = args.summary_output or (statics_dir / f"{file_prefix}_static_baseline_summary.xlsx")
     station_file = args.station_output or (statics_dir / f"{file_prefix}_station_statics.xlsx")
     event_file = args.event_output or (statics_dir / f"{file_prefix}_event_baseline_shifts.xlsx")
+    alignment_file = args.event_alignment_output or (
+        statics_dir / f"{file_prefix}_event_alignment_to_{args.reference_event}.xlsx"
+    )
     corrected_plot_file = args.corrected_output or (
         statics_dir / f"{file_prefix}_event_baseline_corrected_statics_by_station.png"
     )
 
-    df = load_statics(statics_dir, component=component, phase=phase)
+    df = load_statics(
+        statics_dir,
+        component=component,
+        phase=phase,
+        catalog_shift_component=catalog_shift_component,
+    )
     plot_statics_by_station(df, output_file, title_prefix=title_prefix)
     corrected, event_baselines = compute_event_baselines(df, args.mad_threshold)
     station_medians = compute_station_medians(corrected, args.mad_threshold)
+    alignment_shifts = compute_event_alignment_shifts(event_baselines, args.reference_event)
     write_static_summary_workbook(corrected, event_baselines, station_medians, summary_file)
     write_station_statics_workbook(station_medians, station_file)
     write_event_baselines_workbook(event_baselines, event_file)
+    write_event_alignment_workbook(alignment_shifts, alignment_file)
     plot_statics_by_station(
         corrected,
         corrected_plot_file,
@@ -319,11 +405,15 @@ def main() -> None:
         y_label="Event-baseline-corrected static (s)",
         title_prefix=f"Event-baseline-corrected {title_prefix.lower()}",
     )
-    print(f"Using component={component}, phase={phase}")
+    print(
+        f"Using component={component}, phase={phase}, "
+        f"catalog_shift_component={catalog_shift_component or 'all'}"
+    )
     print(f"Wrote {output_file} from {len(df)} statics in {df['event_id'].nunique()} events")
     print(f"Wrote {summary_file}")
     print(f"Wrote {station_file}")
     print(f"Wrote {event_file}")
+    print(f"Wrote {alignment_file}")
     print(f"Wrote {corrected_plot_file}")
 
 

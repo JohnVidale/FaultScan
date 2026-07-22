@@ -2,8 +2,8 @@
   "min_freq":       3.0,
   "max_freq":      10.0,
 
-  "start_time":     4.0,
-  "end_time":       6.0,
+  "start_time":     4.75,
+  "end_time":       5.75,
 
   "win_pre":        0.05,
   "win_post":       0.15,
@@ -13,18 +13,23 @@
 
   "analysis_hz": 250,
 
-  "all_channels": false,
-  "component": "R",
+  "all_channels": true,
+  "component": "T",
   "align_phase": "S",
-  "verbose": false,
   "input_mode": "snippets",
 
+  "event_alignment_reference": "CI_40353472",
+  "event_stack_alignment_max_shift_sec": 0.2,
+  "use_event_stack_xcorr_alignment": false,
+  "use_station_static_correction": false,
+  "station_static_file": "/Users/jvidale/Documents/Research/FaultScanR/event_sta_info/stations.xlsx",
+  "station_static_column": "station static s",
+  "use_json_event_location": true,
   "event_lat":   33.480,
   "event_lon": -116.513,
   "event_depth":  9.300,
 
   "events": [
-    "CI_40353272",
     "CI_40353400",
     "CI_40353408",
     "CI_40353416",
@@ -39,7 +44,6 @@
     "CI_40353480",
     "CI_40353488",
     "CI_40353496",
-    "CI_40353504",
     "CI_40353512",
     "CI_40353520",
     "CI_40353528",
@@ -54,11 +58,8 @@
     "CI_40353664",
     "CI_40353672",
     "CI_40353680",
-    "CI_40353688",
-    "CI_40353728",
     "CI_40353760",
     "CI_40353768",
-    "CI_40353792",
     "CI_40353832",
     "CI_37453092",
     "CI_40353840",
@@ -66,7 +67,7 @@
     "CI_40353880"
   ],
 
-  "show_individual_seismograms": true,
+  "show_individual_seismograms": false,
   "overlay_original_on_individual": true,
-  "show_record_section_plot": true
+  "show_record_section_plot": false
 }

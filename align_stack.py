@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import time
 import json
 import re
+import subprocess
 
 from obspy import UTCDateTime, Stream, Trace
 from obspy.geodetics import gps2dist_azimuth
@@ -61,7 +62,6 @@ move_limit_sec                = 0.05      # Maximum allowed shift (seconds) sear
 all_channels = True  # If True to process all channels
 component   = "R"       # Component selection: 'Z', 'R', or 'T'
 align_phase = "S"       # Alignment phase 'P' or 'S'
-verbose     = False     # If True, print detailed processing info
 
 # Paths
 path_prefix = "/Users/jvidale/Documents/Research/FaultScanR/"
@@ -75,6 +75,18 @@ snippets_root = Path(path_prefix + f"Sgrams/Snippets_{analysis_hz}Hz")
 event       = "CI_40353544" # Single run selection (used when the corresponding "all_*" is False)
 # event       = "CI_40353664" # Single run selection (used when the corresponding "all_*" is False)
 events = [event]        # Allows for future modification to process multiple events
+use_json_event_location = False
+event_lat_override: float | None = None
+event_lon_override: float | None = None
+event_depth_override: float | None = None
+event_alignment_reference = "CI_40353472"
+event_stack_alignment_max_shift_sec = 0.2
+use_event_stack_xcorr_alignment = True
+event_progress_say_rate = 130
+use_station_static_correction = False
+station_static_file = info_root / "stations.xlsx"
+station_static_column = "station static s"
+_station_static_cache: dict[str, float] | None = None
 
 # plotting options (user-facing)
 show_individual_seismograms = False  # Plot individual seismograms (20 traces/plot, 5 panels/figure)
@@ -88,10 +100,18 @@ def apply_input_config(config_file: Path) -> None:
     """Load optional JSON run-parameter input file and override defaults."""
     global min_freq, max_freq, start_time, end_time
     global win_pre, win_post, r_window_min, move_limit_sec
-    global all_channels, component, align_phase, verbose
+    global all_channels, component, align_phase
     global data_path, event, events
     global analysis_hz, input_mode
     global snippets_root
+    global use_json_event_location
+    global event_lat_override, event_lon_override, event_depth_override
+    global event_alignment_reference
+    global event_stack_alignment_max_shift_sec
+    global use_event_stack_xcorr_alignment
+    global event_progress_say_rate
+    global use_station_static_correction, station_static_file, station_static_column
+    global _station_static_cache
     global show_individual_seismograms, show_record_section_plot
 
     def parse_sampling_hz(value, default_hz: int) -> int:
@@ -133,7 +153,6 @@ def apply_input_config(config_file: Path) -> None:
     all_channels = bool(cfg.get("all_channels", all_channels))
     component = str(cfg.get("component", component))
     align_phase = str(cfg.get("align_phase", align_phase))
-    verbose = bool(cfg.get("verbose", verbose))
 
     analysis_hz = parse_sampling_hz(cfg.get("analysis_hz", analysis_hz), analysis_hz)
 
@@ -146,6 +165,63 @@ def apply_input_config(config_file: Path) -> None:
         events = [str(cfg["event"])]
     if events:
         event = events[0]
+
+    event_alignment_reference = str(
+        cfg.get("event_alignment_reference", event_alignment_reference)
+    )
+    event_stack_alignment_max_shift_sec = float(
+        cfg.get("event_stack_alignment_max_shift_sec", event_stack_alignment_max_shift_sec)
+    )
+    if event_stack_alignment_max_shift_sec <= 0.0:
+        raise ValueError(
+            "event_stack_alignment_max_shift_sec must be positive; "
+            f"got {event_stack_alignment_max_shift_sec}"
+        )
+    use_event_stack_xcorr_alignment = bool(
+        cfg.get("use_event_stack_xcorr_alignment", use_event_stack_xcorr_alignment)
+    )
+    use_station_static_correction = bool(
+        cfg.get("use_station_static_correction", use_station_static_correction)
+    )
+    station_static_file = Path(cfg.get("station_static_file", station_static_file))
+    station_static_column = str(
+        cfg.get("station_static_column", station_static_column)
+    )
+    _station_static_cache = None
+    event_progress_say_rate = int(
+        cfg.get("event_progress_say_rate", event_progress_say_rate)
+    )
+    if event_progress_say_rate <= 0:
+        raise ValueError(
+            "event_progress_say_rate must be positive; "
+            f"got {event_progress_say_rate}"
+        )
+
+    use_json_event_location = bool(
+        cfg.get("use_json_event_location", use_json_event_location)
+    )
+    if use_json_event_location:
+        required_location = ("event_lat", "event_lon", "event_depth")
+        missing_location = [key for key in required_location if key not in cfg]
+        if missing_location:
+            raise ValueError(
+                "use_json_event_location requires "
+                f"{', '.join(required_location)}; missing {', '.join(missing_location)}"
+            )
+
+        event_lat_override = float(cfg["event_lat"])
+        event_lon_override = float(cfg["event_lon"])
+        event_depth_override = float(cfg["event_depth"])
+        if not -90.0 <= event_lat_override <= 90.0:
+            raise ValueError(f"event_lat must be between -90 and 90; got {event_lat_override}")
+        if not -180.0 <= event_lon_override <= 180.0:
+            raise ValueError(f"event_lon must be between -180 and 180; got {event_lon_override}")
+        if event_depth_override < 0.0:
+            raise ValueError(f"event_depth must be non-negative; got {event_depth_override}")
+    else:
+        event_lat_override = None
+        event_lon_override = None
+        event_depth_override = None
 
     data_path = Path(path_prefix + f"Sgrams/20220930_{analysis_hz}Hz")
     snippets_root = Path(path_prefix + f"Sgrams/Snippets_{analysis_hz}Hz")
@@ -202,13 +278,23 @@ def write_run_parameter_snapshot(output_dir: Path) -> Path:
         "all_channels": all_channels,
         "component": component,
         "align_phase": align_phase,
-        "verbose": verbose,
         "info_root": _snapshot_path(info_root),
         "input_mode": input_mode,
         "analysis_hz": analysis_hz,
         "data_path": _snapshot_path(data_path),
         "snippets_root": _snapshot_path(snippets_root),
         "events": list(events),
+        "event_alignment_reference": event_alignment_reference,
+        "event_stack_alignment_max_shift_sec": event_stack_alignment_max_shift_sec,
+        "use_event_stack_xcorr_alignment": use_event_stack_xcorr_alignment,
+        "event_progress_say_rate": event_progress_say_rate,
+        "use_station_static_correction": use_station_static_correction,
+        "station_static_file": _snapshot_path(station_static_file),
+        "station_static_column": station_static_column,
+        "use_json_event_location": use_json_event_location,
+        "event_lat": event_lat_override,
+        "event_lon": event_lon_override,
+        "event_depth": event_depth_override,
         "show_individual_seismograms": show_individual_seismograms,
         "show_record_section_plot": show_record_section_plot,
     }
@@ -239,6 +325,186 @@ def get_run_event_output_dir(eve_id: str) -> Path:
     event_dir = RUN_OUTPUT_DIR / eve_id  # type: ignore[union-attr]
     event_dir.mkdir(parents=True, exist_ok=True)
     return event_dir
+
+
+def write_component_phase_time_shifts(
+    save_dir: Path,
+    eve_id: str,
+    plot_comp: str,
+    align_phase_name: str,
+    station_shifts: dict,
+    calc_shifts: dict,
+    station_corr: dict,
+    pass_window_ids: set,
+    sample_rate: float,
+    min_freq_hz: float,
+    max_freq_hz: float,
+) -> Path | None:
+    """Write station residual shifts for one event/component to the statics directory."""
+    catalog_shift_component = component.upper()
+    if catalog_shift_component not in {"R", "T"}:
+        raise ValueError(
+            "component must be 'R' or 'T' when writing statics; "
+            f"got {component!r}"
+        )
+    stations = sorted(set(station_shifts) & set(calc_shifts), key=lambda station: int(station))
+    if not stations:
+        print(f"[WARN] No station shifts available to write for {eve_id} {plot_comp} {align_phase_name}.")
+        return None
+
+    rows = []
+    for station in stations:
+        measured_shift = float(station_shifts[station]["lag_seconds"])
+        predicted_shift = float(calc_shifts[station])
+        rows.append(
+            {
+                "event_id": eve_id,
+                "station": station,
+                "component": plot_comp,
+                "catalog_shift_component": catalog_shift_component,
+                "phase": align_phase_name,
+                "frequency_min_hz": float(min_freq_hz),
+                "frequency_max_hz": float(max_freq_hz),
+                "sample_rate_hz": float(sample_rate),
+                "measured_shift_seconds": measured_shift,
+                "predicted_shift_seconds": predicted_shift,
+                "shift_relative_to_predicted_seconds": measured_shift - predicted_shift,
+                "lag_samples": int(station_shifts[station]["lag_samples"]),
+                "station_correlation": float(station_corr.get(station, np.nan)),
+                "passed_window_correlation": station in pass_window_ids,
+                "source_output_dir": str(save_dir),
+            }
+        )
+
+    statics_dir = Path(path_prefix) / "output" / "Statics"
+    statics_dir.mkdir(parents=True, exist_ok=True)
+    frequency_label = f"{min_freq_hz:g}-{max_freq_hz:g}Hz"
+    out_file = statics_dir / (
+        f"{eve_id}_{plot_comp}_{align_phase_name}_{frequency_label}_"
+        f"shift{catalog_shift_component}_xcorr_statics.xlsx"
+    )
+    pd.DataFrame(rows).to_excel(out_file, index=False)
+    print(f"✓ Station residual shifts saved to: {out_file}")
+    return out_file
+
+
+def apply_event_location_override(
+    event_depth: float,
+    eve_lat: float,
+    eve_lon: float,
+) -> tuple[float, float, float]:
+    """Return JSON event location when enabled; otherwise retain catalog metadata."""
+    if not use_json_event_location:
+        return event_depth, eve_lat, eve_lon
+
+    if (
+        event_lat_override is None
+        or event_lon_override is None
+        or event_depth_override is None
+    ):
+        raise RuntimeError(
+            "use_json_event_location is enabled, but the JSON event location is unavailable"
+        )
+
+    print(
+        "Using JSON event location override: "
+        f"lat={event_lat_override:.6f}, lon={event_lon_override:.6f}, "
+        f"depth={event_depth_override:.3f} km"
+    )
+    return event_depth_override, event_lat_override, event_lon_override
+
+
+def catalog_time_shift_column() -> str:
+    """Return the event-time-shift column shared by all waveform components."""
+    return "time shift"
+
+
+def apply_event_origin_time_shift(eve_id: str, origin: UTCDateTime) -> UTCDateTime:
+    """Apply the shared catalog event shift independently of location selection."""
+    if catalog_local is None:
+        raise RuntimeError("Catalog is unavailable; cannot apply the event time shift")
+    shift_column = catalog_time_shift_column()
+    if shift_column not in catalog_local.columns:
+        raise RuntimeError(f'Catalog is missing the required "{shift_column}" column')
+
+    matching_rows = catalog_local.loc[catalog_local["evid"] == eve_id, shift_column]
+    if matching_rows.empty:
+        raise RuntimeError(f"Event {eve_id} is missing from the catalog time-shift table")
+
+    time_shift = float(matching_rows.iloc[0])
+    if not np.isfinite(time_shift):
+        raise RuntimeError(f"Event {eve_id} has no finite catalog time shift")
+
+    adjusted_origin = origin + time_shift
+    print(
+        f"Using catalog {shift_column}: "
+        f"{eve_id} origin shifted by {time_shift:+.6f} s"
+    )
+    return adjusted_origin
+
+
+def event_time_shift_for_plot(eve_id: str) -> float:
+    """Return the shared catalog event shift for plotting markers."""
+    if catalog_local is None:
+        return 0.0
+    shift_column = catalog_time_shift_column()
+    if shift_column not in catalog_local.columns:
+        return 0.0
+    matching_rows = catalog_local.loc[catalog_local["evid"] == eve_id, shift_column]
+    if matching_rows.empty:
+        return 0.0
+    time_shift = float(matching_rows.iloc[0])
+    return time_shift if np.isfinite(time_shift) else 0.0
+
+
+def imposed_station_shifts_for_stream(
+    st_comp: Stream,
+    ref_station_id: str,
+) -> dict[str, float] | None:
+    """Load station statics and express them relative to the selected reference station."""
+    global _station_static_cache
+    if not use_station_static_correction:
+        return None
+
+    if _station_static_cache is None:
+        if not station_static_file.exists():
+            raise FileNotFoundError(f"Station static file not found: {station_static_file}")
+        station_df = pd.read_excel(station_static_file, dtype={"station": str})
+        required = {"station", station_static_column}
+        missing = required - set(station_df.columns)
+        if missing:
+            raise ValueError(
+                f"{station_static_file} is missing required columns: {sorted(missing)}"
+            )
+        station_df = station_df[["station", station_static_column]].copy()
+        station_df["station"] = station_df["station"].astype(str).str.zfill(5)
+        station_df[station_static_column] = pd.to_numeric(
+            station_df[station_static_column], errors="coerce"
+        )
+        station_df = station_df.dropna(subset=[station_static_column])
+        _station_static_cache = dict(
+            zip(station_df["station"], station_df[station_static_column], strict=True)
+        )
+
+    station_ids = {str(trace.stats.station).zfill(5) for trace in st_comp}
+    missing_station_ids = sorted(station_ids - set(_station_static_cache))
+    if missing_station_ids:
+        raise ValueError(
+            f"Station statics are missing for {len(missing_station_ids)} processed stations, "
+            f"including {', '.join(missing_station_ids[:10])}"
+        )
+
+    normalized_ref = str(ref_station_id).zfill(5)
+    ref_static = _station_static_cache[normalized_ref]
+    imposed = {
+        station_id: _station_static_cache[station_id] - ref_static
+        for station_id in station_ids
+    }
+    print(
+        f"Using imposed station statics from {station_static_file.name} "
+        f"column {station_static_column!r}; reference {normalized_ref} is set to 0 s"
+    )
+    return imposed
 
 # ===================== Helper functions =====================
 
@@ -1806,6 +2072,11 @@ def plot_all_events_component_stacks(
         print("[WARN] No component stacks were collected; skipping all-events stack summary plot.")
         return None
 
+    skipped_event_ids: set[str] = set()
+    if catalog_local is not None and {"evid", "skip"}.issubset(catalog_local.columns):
+        skip_values = pd.to_numeric(catalog_local["skip"], errors="coerce")
+        skipped_event_ids = set(catalog_local.loc[skip_values == 2, "evid"].astype(str))
+
     comp_keys = sorted(component_stacks.keys())
     fig_h = max(3.0, 3.2 * len(comp_keys))
     fig, axes = plt.subplots(len(comp_keys), 1, figsize=(12, fig_h), sharex=False)
@@ -1816,11 +2087,12 @@ def plot_all_events_component_stacks(
     for idx, comp_name in enumerate(comp_keys):
         ax = axes[idx]
         series = component_stacks.get(comp_name, [])
-        if len(series) == 0:
+        plot_series = [item for item in series if item[0] not in skipped_event_ids]
+        if len(plot_series) == 0:
             ax.set_axis_off()
             continue
 
-        for eve_id, t_abs, mask, stack_vec, _meta in series:
+        for eve_id, t_abs, mask, stack_vec, _meta in plot_series:
             plot_mask = mask
             if not np.any(plot_mask):
                 plot_mask = np.ones_like(t_abs, dtype=bool)
@@ -1832,9 +2104,9 @@ def plot_all_events_component_stacks(
 
         ax.axhline(0.0, color="k", lw=0.6, alpha=0.5)
         ax.set_ylabel("Norm amp")
-        ax.set_title(f"Component {comp_name} (N={len(series)})", fontsize=11, fontweight="bold")
+        ax.set_title(f"Component {comp_name} (N={len(plot_series)})", fontsize=11, fontweight="bold")
         ax.grid(alpha=0.25)
-        if len(series) <= 14:
+        if len(plot_series) <= 14:
             ax.legend(loc="upper right", fontsize=8, ncol=1)
 
     axes[-1].set_xlabel("Time since origin (s)")
@@ -1944,6 +2216,229 @@ def plot_all_events_component_offsets(
     return out_files
 
 
+def compute_event_stack_alignment_shifts(
+    series: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, dict]],
+    reference_event: str,
+    max_shift_sec: float,
+    measure_xcorr_residual: bool = True,
+) -> pd.DataFrame:
+    """Return shifts for plotting final event stacks against a reference stack.
+
+    When cross-correlation alignment is disabled, no inter-event shift is
+    measured or applied here.
+    """
+    lookup = {eve_id: (t_abs, mask, stack_vec, meta) for eve_id, t_abs, mask, stack_vec, meta in series}
+    if reference_event not in lookup:
+        raise ValueError(f"Reference event {reference_event} is not among the plotted stacks")
+
+    if measure_xcorr_residual:
+        _ref_time, _ref_mask, ref_stack, ref_meta = lookup[reference_event]
+        ref_sample_rate = float(ref_meta["sample_rate"])
+        ref_win_start = int(ref_meta["win_start"])
+        ref_win_end = int(ref_meta["win_end"])
+        ref_window = ref_stack[ref_win_start:ref_win_end].astype(float, copy=False)
+        ref_norm = float(np.linalg.norm(ref_window))
+        if ref_window.size == 0 or ref_norm == 0.0:
+            raise ValueError(f"Reference event {reference_event} has an empty correlation window")
+
+    rows = []
+    for eve_id, _t_abs, _mask, stack_vec, meta in series:
+        if measure_xcorr_residual:
+            sample_rate = float(meta["sample_rate"])
+            if not np.isclose(sample_rate, ref_sample_rate):
+                raise ValueError(
+                    f"Cannot cross-correlate {eve_id} ({sample_rate} Hz) with "
+                    f"{reference_event} ({ref_sample_rate} Hz)"
+                )
+            win_start = int(meta["win_start"])
+            win_end = int(meta["win_end"])
+            search_samples = int(round(max_shift_sec * sample_rate))
+            search_start = max(0, win_start - search_samples)
+            search_end = min(len(stack_vec), win_end + search_samples)
+            search_data = stack_vec[search_start:search_end].astype(float, copy=False)
+            windows = np.lib.stride_tricks.sliding_window_view(search_data, ref_window.size)
+            dot_products = windows @ ref_window
+            window_norms = np.linalg.norm(windows, axis=1)
+            correlations = np.divide(
+                dot_products,
+                window_norms * ref_norm,
+                out=np.full(len(dot_products), -np.inf),
+                where=window_norms > 0.0,
+            )
+            best_index = int(np.argmax(correlations))
+            residual_lag_samples = search_start + best_index - win_start
+            residual_lag_seconds = residual_lag_samples / sample_rate
+            waveform_correlation = float(correlations[best_index])
+            predicted_shift_seconds = float(meta.get("t_ref", 0.0)) - float(ref_meta.get("t_ref", 0.0))
+            shift_left_seconds = predicted_shift_seconds + residual_lag_seconds
+            if eve_id == reference_event:
+                residual_lag_samples = 0
+                residual_lag_seconds = 0.0
+                predicted_shift_seconds = 0.0
+                shift_left_seconds = 0.0
+        else:
+            residual_lag_samples = 0
+            residual_lag_seconds = 0.0
+            waveform_correlation = np.nan
+            predicted_shift_seconds = 0.0
+            shift_left_seconds = 0.0
+
+        rows.append(
+            {
+                "event_id": eve_id,
+                "reference_event_id": reference_event,
+                "predicted_shift_seconds": predicted_shift_seconds,
+                "xcorr_residual_lag_samples": residual_lag_samples,
+                "xcorr_residual_lag_seconds": residual_lag_seconds,
+                "waveform_correlation": waveform_correlation,
+                "shift_left_to_align_waveform_seconds": shift_left_seconds,
+                "shift_right_to_align_waveform_seconds": -shift_left_seconds,
+                "xcorr_residual_measured": measure_xcorr_residual,
+                "is_reference_event": eve_id == reference_event,
+            }
+        )
+
+    return pd.DataFrame(rows).sort_values("event_id").reset_index(drop=True)
+
+
+def plot_all_events_component_offsets_aligned(
+    component_stacks: dict[str, list[tuple[str, np.ndarray, np.ndarray, np.ndarray, dict]]],
+    run_output_dir: Path | None,
+    align_phase_name: str,
+    reference_event: str,
+    max_shift_sec: float,
+) -> list[Path]:
+    """Plot vertically offset stacks after direct stack-to-stack alignment."""
+    if run_output_dir is None or not component_stacks:
+        return []
+
+    out_files: list[Path] = []
+    skipped_event_ids: set[str] = set()
+    if catalog_local is not None and {"evid", "skip"}.issubset(catalog_local.columns):
+        skip_values = pd.to_numeric(catalog_local["skip"], errors="coerce")
+        skipped_event_ids = set(catalog_local.loc[skip_values == 2, "evid"].astype(str))
+
+    for comp_name in sorted(component_stacks.keys()):
+        series = component_stacks[comp_name]
+        if not series:
+            continue
+        try:
+            alignment_df = compute_event_stack_alignment_shifts(
+                series,
+                reference_event,
+                max_shift_sec,
+                measure_xcorr_residual=use_event_stack_xcorr_alignment,
+            )
+        except ValueError as exc:
+            print(f"[WARN] Skipping aligned {comp_name} stack plot: {exc}")
+            continue
+        shifts = dict(
+            zip(
+                alignment_df["event_id"],
+                alignment_df["shift_left_to_align_waveform_seconds"],
+                strict=True,
+            )
+        )
+        alignment_df["catalog_time_shift_seconds"] = alignment_df["event_id"].map(
+            event_time_shift_for_plot
+        )
+        reference_meta = next(meta for eve_id, _, _, _, meta in series if eve_id == reference_event)
+        reference_t_ref = reference_meta.get("t_ref")
+        (
+            reference_win_start,
+            reference_win_end,
+            reference_search_start,
+            reference_search_end,
+        ) = correlation_time_bounds(
+            float(reference_meta["start_time"]),
+            int(reference_meta["win_start"]),
+            int(reference_meta["win_end"]),
+            float(reference_meta["sample_rate"]),
+            float(reference_meta["move_limit_sec"]),
+            int(reference_meta["npts"]),
+        )
+
+        plot_series = [item for item in series if item[0] not in skipped_event_ids]
+        if not plot_series:
+            print(f"[WARN] No non-skip=2 events available for aligned {comp_name} stack plot.")
+            continue
+
+        fig_h = max(4.5, 0.35 * len(plot_series) + 2.0)
+        fig, ax = plt.subplots(1, 1, figsize=(12, fig_h))
+        set_figure_title(fig, f"All events {comp_name} stacks aligned to {reference_event}")
+        offsets = np.arange(len(plot_series), dtype=float)
+
+        for i, (eve_id, t_abs, mask, stack_vec, meta) in enumerate(plot_series):
+            plot_mask = mask if np.any(mask) else np.ones_like(t_abs, dtype=bool)
+            shift_left = float(shifts[eve_id])
+            catalog_time_shift = event_time_shift_for_plot(eve_id)
+            aligned_time = t_abs[plot_mask] - shift_left
+            y = stack_vec[plot_mask]
+            ymax = float(np.max(np.abs(y))) if y.size > 0 else 0.0
+            if ymax > 0:
+                y = y / ymax
+            ax.plot(aligned_time, y + offsets[i], lw=1.0, color="k")
+
+            y0, y1 = offsets[i] - 0.42, offsets[i] + 0.42
+            if reference_t_ref is not None:
+                ax.vlines(float(reference_t_ref), y0, y1, color="g", lw=1.1, alpha=0.9, linestyles="--")
+            ax.vlines(
+                [reference_win_start, reference_win_end],
+                y0,
+                y1,
+                color="tab:orange",
+                lw=1.2,
+            )
+            ax.vlines(
+                [reference_search_start, reference_search_end],
+                y0,
+                y1,
+                color="y",
+                lw=1.2,
+            )
+
+            ax.text(
+                float(aligned_time[-1]),
+                offsets[i],
+                f"  {eve_id} (time shift {catalog_time_shift:+.3f} s)",
+                fontsize=7,
+                va="center",
+                ha="left",
+            )
+
+        ax.set_xlabel(f"Time aligned to {reference_event} (s)")
+        ax.set_ylabel("Event index (offset)")
+        ax.set_yticks(offsets)
+        if len(plot_series) <= 30:
+            ax.set_yticklabels([eve_id for eve_id, _, _, _, _ in plot_series], fontsize=7)
+        else:
+            ax.set_yticklabels([str(i + 1) for i in range(len(plot_series))], fontsize=7)
+        ax.grid(alpha=0.2)
+        ax.set_title(
+            f"Component {comp_name}: stacks aligned to {reference_event} (N={len(plot_series)})",
+            fontsize=12,
+            fontweight="bold",
+        )
+        plt.tight_layout()
+
+        out_file = run_output_dir / (
+            f"all_events_{comp_name}_offset_stacks_{align_phase_name}_"
+            f"xcorr_aligned_to_{reference_event}.png"
+        )
+        fig.savefig(out_file, dpi=300, bbox_inches="tight")
+        print(f"✓ Aligned per-component offset stack plot saved to: {out_file}")
+        plt.close(fig)
+        out_files.append(out_file)
+
+        alignment_file = run_output_dir / (
+            f"all_events_{comp_name}_stack_xcorr_alignment_to_{reference_event}.xlsx"
+        )
+        alignment_df.to_excel(alignment_file, index=False)
+        print(f"✓ Event stack alignment shifts saved to: {alignment_file}")
+
+    return out_files
+
+
 def get_event_data_path(eve_id: str) -> Path:
     """Resolve waveform input root for one event."""
     if input_mode == "snippets":
@@ -2024,6 +2519,12 @@ def load_event_context_and_waveforms(
 ):
     """Load event metadata/station lookup and read event waveforms for one channel."""
     event_depth, eve_lat, eve_lon, origin = load_event_metadata(eve_id, info_root)
+    event_depth, eve_lat, eve_lon = apply_event_location_override(
+        event_depth,
+        eve_lat,
+        eve_lon,
+    )
+    origin = apply_event_origin_time_shift(eve_id, origin)
     save_dir = get_run_event_output_dir(eve_id)
     name2ll = load_station_lookup(info_root)
     event_data_path = get_event_data_path(eve_id)
@@ -2047,7 +2548,6 @@ def load_event_context_and_waveforms(
         sampling_hz=analysis_hz,
         start_time=start_time,
         end_time=end_time,
-        verbose=verbose,
         timing_state=timing_state,
     )
     if st_window is None:
@@ -2325,6 +2825,7 @@ def compute_alignment_products(
         t_ref=t_ref,
         timing_state=timing_state,
     )
+    imposed_station_shifts = imposed_station_shifts_for_stream(st_comp, ref_station_id)
 
     # ===================== Stage 1: align to reference -> aligned_stack =====================
     aligned_stack = compute_stage1_aligned_stack(
@@ -2336,6 +2837,7 @@ def compute_alignment_products(
         win_end=win_end,
         move_limit_samples=move_limit_samples,
         calc_shifts=calc_shifts,
+        imposed_station_shifts=imposed_station_shifts,
         timing_state=timing_state,
     )
 
@@ -2349,6 +2851,7 @@ def compute_alignment_products(
         win_end=win_end,
         move_limit_samples=move_limit_samples,
         calc_shifts=calc_shifts,
+        imposed_station_shifts=imposed_station_shifts,
         r_window_min=r_window_min,
         timing_state=timing_state,
     )
@@ -2367,6 +2870,7 @@ def compute_alignment_products(
         ref_station_id=ref_station_id,
         selected_ids=selected_ids,
         calc_shifts=calc_shifts,
+        imposed_station_shifts=imposed_station_shifts,
         npts=npts,
         sample_rate=sample_rate,
         win_start=win_start,
@@ -2431,7 +2935,7 @@ def run_pipeline() -> None:
         all_channels, component
     )
 
-    for eve_id in events:
+    for event_count, eve_id in enumerate(events, start=1):
         print(f"==========Processing event {eve_id}===========")
         # Reset per-event caches/payloads so each event gets its own 3-comp products.
         all_component_data = {}
@@ -2550,6 +3054,22 @@ def run_pipeline() -> None:
                     },
                 )
             )
+            if use_station_static_correction:
+                print("Using imposed station statics; not writing newly measured station statics.")
+            else:
+                write_component_phase_time_shifts(
+                    save_dir=save_dir,
+                    eve_id=eve_id,
+                    plot_comp=plot_comp,
+                    align_phase_name=align_phase,
+                    station_shifts=station_shifts,
+                    calc_shifts=calc_shifts,
+                    station_corr=station_corr,
+                    pass_window_ids=pass_window_ids,
+                    sample_rate=sample_rate,
+                    min_freq_hz=min_freq,
+                    max_freq_hz=max_freq,
+                )
 
             _plot_wall_start, _plot_cpu_start = start_plot_timing()
             if not all_channels:
@@ -2722,15 +3242,27 @@ def run_pipeline() -> None:
 
             finalize_three_component_plotting(_plot3_wall_start, _plot3_cpu_start)
 
+        if event_count % 5 == 0:
+            try:
+                subprocess.Popen(
+                    ["say", "-r", str(event_progress_say_rate), f"{event_count} events processed"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except FileNotFoundError:
+                print(f"[INFO] Processed {event_count} events (macOS 'say' command unavailable).")
+
     plot_all_events_component_stacks(
         component_stacks=component_stacks_by_name,
         run_output_dir=RUN_OUTPUT_DIR,
         align_phase_name=align_phase,
     )
-    plot_all_events_component_offsets(
+    plot_all_events_component_offsets_aligned(
         component_stacks=component_stacks_by_name,
         run_output_dir=RUN_OUTPUT_DIR,
         align_phase_name=align_phase,
+        reference_event=event_alignment_reference,
+        max_shift_sec=event_stack_alignment_max_shift_sec,
     )
 
 def main() -> None:

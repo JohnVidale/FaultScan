@@ -6,6 +6,7 @@ from unittest.mock import patch
 from unittest.mock import Mock
 
 import pandas as pd
+import numpy as np
 
 
 class AlignStackSmokeTests(unittest.TestCase):
@@ -178,6 +179,10 @@ class AlignStackSmokeTests(unittest.TestCase):
             side_effect=lambda event_depth, eve_lat, eve_lon: (event_depth, eve_lat, eve_lon),
         ), patch.object(
             self.mod,
+            "apply_event_origin_time_shift",
+            side_effect=lambda eve_id, origin: origin,
+        ), patch.object(
+            self.mod,
             "load_station_lookup",
             return_value={"STA": (35.0, -117.0)},
         ), patch.object(
@@ -210,6 +215,10 @@ class AlignStackSmokeTests(unittest.TestCase):
                 self.mod,
                 "apply_event_location_override",
                 side_effect=lambda event_depth, eve_lat, eve_lon: (event_depth, eve_lat, eve_lon),
+            ), patch.object(
+                self.mod,
+                "apply_event_origin_time_shift",
+                side_effect=lambda eve_id, origin: origin,
             ), patch.object(
                 self.mod,
                 "load_station_lookup",
@@ -339,7 +348,11 @@ class AlignStackSmokeTests(unittest.TestCase):
         self.assertEqual(out, expected)
 
     def test_apply_event_location_override_uses_configured_values(self):
-        with patch.object(self.mod, "event_lat_override", 33.48), patch.object(
+        with patch.object(self.mod, "use_json_event_location", True), patch.object(
+            self.mod,
+            "event_lat_override",
+            33.48,
+        ), patch.object(
             self.mod,
             "event_lon_override",
             -116.513,
@@ -352,9 +365,127 @@ class AlignStackSmokeTests(unittest.TestCase):
 
         self.assertEqual(out, (9.3, 33.48, -116.513))
 
+    def test_apply_event_location_override_uses_catalog_when_disabled(self):
+        with patch.object(self.mod, "use_json_event_location", False):
+            out = self.mod.apply_event_location_override(
+                event_depth=1.0,
+                eve_lat=2.0,
+                eve_lon=3.0,
+            )
+
+        self.assertEqual(out, (1.0, 2.0, 3.0))
+
+    def test_apply_event_origin_time_shift_uses_catalog_shift(self):
+        catalog = pd.DataFrame({"evid": ["CI_TEST"], "time shift": [0.024]})
+        origin = self.mod.UTCDateTime("2022-09-30T11:56:20.82Z")
+
+        with patch.object(self.mod, "catalog_local", catalog):
+            adjusted = self.mod.apply_event_origin_time_shift("CI_TEST", origin)
+
+        self.assertAlmostEqual(adjusted - origin, 0.024)
+
+    def test_apply_event_origin_time_shift_uses_shared_column_for_all_components(self):
+        catalog = pd.DataFrame({"evid": ["CI_TEST"], "time shift": [-0.031]})
+        origin = self.mod.UTCDateTime("2022-09-30T11:56:20.82Z")
+
+        with patch.object(self.mod, "component", "T"), patch.object(
+            self.mod, "catalog_local", catalog
+        ):
+            adjusted = self.mod.apply_event_origin_time_shift("CI_TEST", origin)
+
+        self.assertAlmostEqual(adjusted - origin, -0.031)
+
+    def test_apply_event_origin_time_shift_is_independent_of_location_override(self):
+        origin = self.mod.UTCDateTime("2022-09-30T11:56:20.82Z")
+        catalog = pd.DataFrame({"evid": ["CI_TEST"], "time shift": [0.015]})
+
+        with patch.object(self.mod, "use_json_event_location", False), patch.object(
+            self.mod, "catalog_local", catalog
+        ):
+            adjusted = self.mod.apply_event_origin_time_shift("CI_TEST", origin)
+
+        self.assertAlmostEqual(adjusted - origin, 0.015)
+
+    def test_imposed_station_shifts_are_relative_to_reference_station(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            station_file = Path(tmp) / "stations.xlsx"
+            pd.DataFrame(
+                {
+                    "station": ["00001", "00002"],
+                    "station static s": [0.012, 0.035],
+                }
+            ).to_excel(station_file, index=False)
+            reference = self.mod.Trace(data=np.ones(5))
+            reference.stats.station = "00001"
+            other = self.mod.Trace(data=np.ones(5))
+            other.stats.station = "00002"
+            stream = self.mod.Stream([reference, other])
+
+            with patch.object(self.mod, "use_station_static_correction", True), patch.object(
+                self.mod, "station_static_file", station_file
+            ), patch.object(self.mod, "station_static_column", "station static s"), patch.object(
+                self.mod, "_station_static_cache", None
+            ):
+                shifts = self.mod.imposed_station_shifts_for_stream(stream, "00001")
+
+        self.assertEqual(shifts["00001"], 0.0)
+        self.assertAlmostEqual(shifts["00002"], 0.023)
+
+    def test_compute_event_stack_alignment_shifts_finds_delayed_stack(self):
+        meta = {
+            "sample_rate": 10.0,
+            "win_start": 4,
+            "win_end": 7,
+            "t_ref": 5.0,
+        }
+        reference = np.array([0, 0, 0, 0, 1, 2, 1, 0, 0, 0, 0, 0], dtype=float)
+        delayed = np.array([0, 0, 0, 0, 0, 0, 1, 2, 1, 0, 0, 0], dtype=float)
+        series = [
+            ("REF", np.arange(12) / 10.0, np.ones(12, dtype=bool), reference, meta),
+            ("LATE", np.arange(12) / 10.0, np.ones(12, dtype=bool), delayed, meta),
+        ]
+
+        shifts = self.mod.compute_event_stack_alignment_shifts(
+            series=series,
+            reference_event="REF",
+            max_shift_sec=0.2,
+        ).set_index("event_id")
+
+        self.assertEqual(shifts.loc["REF", "shift_left_to_align_waveform_seconds"], 0.0)
+        self.assertAlmostEqual(shifts.loc["LATE", "shift_left_to_align_waveform_seconds"], 0.2)
+        self.assertAlmostEqual(shifts.loc["LATE", "waveform_correlation"], 1.0)
+
+    def test_compute_event_stack_alignment_shifts_skips_xcorr_when_disabled(self):
+        meta = {
+            "sample_rate": 10.0,
+            "win_start": 4,
+            "win_end": 8,
+            "t_ref": 0.6,
+        }
+        reference = np.array([0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 0.0, 0.0, 0.0, 0.0])
+        delayed = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 0.0, 0.0])
+        series = [
+            ("REF", np.arange(12) / 10.0, np.ones(12, dtype=bool), reference, meta),
+            ("LATE", np.arange(12) / 10.0, np.ones(12, dtype=bool), delayed, meta),
+        ]
+
+        shifts = self.mod.compute_event_stack_alignment_shifts(
+            series=series,
+            reference_event="REF",
+            max_shift_sec=0.2,
+            measure_xcorr_residual=False,
+        ).set_index("event_id")
+
+        self.assertEqual(shifts.loc["LATE", "shift_left_to_align_waveform_seconds"], 0.0)
+        self.assertEqual(shifts.loc["LATE", "xcorr_residual_lag_seconds"], 0.0)
+        self.assertFalse(shifts.loc["LATE", "xcorr_residual_measured"])
+        self.assertTrue(np.isnan(shifts.loc["LATE", "waveform_correlation"]))
+
     def test_write_radial_s_wave_time_shifts_saves_residual_excel(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.object(self.mod, "path_prefix", f"{tmp}/"):
+            with patch.object(self.mod, "path_prefix", f"{tmp}/"), patch.object(
+                self.mod, "component", "R"
+            ):
                 out = self.mod.write_component_phase_time_shifts(
                     save_dir=Path(tmp) / "event_plots",
                     eve_id="EV1",
@@ -375,11 +506,12 @@ class AlignStackSmokeTests(unittest.TestCase):
             self.assertIsNotNone(out)
             self.assertEqual(out.parent.name, "Statics")
             self.assertEqual(out.parent.parent.name, "output")
-            self.assertEqual(out.name, "EV1_R_S_3-10Hz_xcorr_statics.xlsx")
+            self.assertEqual(out.name, "EV1_R_S_3-10Hz_shiftR_xcorr_statics.xlsx")
             self.assertEqual(out.suffix, ".xlsx")
             df = pd.read_excel(out)
 
         self.assertEqual(list(df["station"].astype(str)), ["1", "2"])
+        self.assertEqual(set(df["catalog_shift_component"]), {"R"})
         self.assertAlmostEqual(df.loc[0, "shift_relative_to_predicted_seconds"], 0.01)
         self.assertAlmostEqual(df.loc[1, "shift_relative_to_predicted_seconds"], 0.07)
         self.assertTrue(bool(df.loc[0, "passed_window_correlation"]))
@@ -388,7 +520,9 @@ class AlignStackSmokeTests(unittest.TestCase):
     def test_write_component_phase_time_shifts_supports_transverse_and_vertical(self):
         for component in ("T", "Z"):
             with self.subTest(component=component), tempfile.TemporaryDirectory() as tmp:
-                with patch.object(self.mod, "path_prefix", f"{tmp}/"):
+                with patch.object(self.mod, "path_prefix", f"{tmp}/"), patch.object(
+                    self.mod, "component", "T"
+                ):
                     out = self.mod.write_component_phase_time_shifts(
                         save_dir=Path(tmp) / "event_plots",
                         eve_id="EV1",
@@ -404,9 +538,10 @@ class AlignStackSmokeTests(unittest.TestCase):
                     )
 
                 self.assertIsNotNone(out)
-                self.assertEqual(out.name, f"EV1_{component}_S_3-10Hz_xcorr_statics.xlsx")
+                self.assertEqual(out.name, f"EV1_{component}_S_3-10Hz_shiftT_xcorr_statics.xlsx")
                 df = pd.read_excel(out)
                 self.assertEqual(df.loc[0, "component"], component)
+                self.assertEqual(df.loc[0, "catalog_shift_component"], "T")
                 self.assertEqual(df.loc[0, "phase"], "S")
 
 
