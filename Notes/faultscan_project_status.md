@@ -47,9 +47,9 @@ comparisons are physically meaningful.
   defaults.
 - The current reviewed configuration uses 250 Hz snippets, a 3--10 Hz filter,
   T-component S alignment, `all_channels: true`, JSON event-location override
-  enabled, event-stack cross-correlation disabled, and station-static
-  correction disabled. Its active timing window is 4.75--5.75 s, with 0.05 s
-  pre-window and 0.15 s post-window.
+  enabled, event-static correction enabled, and station-static correction
+  disabled. Event-stack cross-correlation is therefore disabled. Its active
+  timing window is 0--12 s, with 0.05 s pre-window and 0.15 s post-window.
 - The shared catalog field `time shift` remains the correction applied across
   all components. T-derived shifts are stored separately in `time shift T` as
   a comparison product.
@@ -99,8 +99,8 @@ comparisons are physically meaningful.
 4. Review the current unstaged changes and decide which source files,
    configuration variants, notes, and generated artifacts belong in version
    control. Avoid committing `.DS_Store` and large disposable run outputs.
-5. Create a concise project README/code index documenting each primary Python
-   script, its inputs, outputs, and normal command sequence.
+5. Keep the project `README.md` code index current as program responsibilities,
+   inputs, outputs, and normal command sequences change.
 6. Extend the durable research notebook with station-quality observations,
    interpretation of notable results, hypotheses, and reasons for decisions.
 

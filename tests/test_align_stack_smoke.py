@@ -379,7 +379,9 @@ class AlignStackSmokeTests(unittest.TestCase):
         catalog = pd.DataFrame({"evid": ["CI_TEST"], "time shift": [0.024]})
         origin = self.mod.UTCDateTime("2022-09-30T11:56:20.82Z")
 
-        with patch.object(self.mod, "catalog_local", catalog):
+        with patch.object(self.mod, "use_event_static_correction", True), patch.object(
+            self.mod, "catalog_local", catalog
+        ):
             adjusted = self.mod.apply_event_origin_time_shift("CI_TEST", origin)
 
         self.assertAlmostEqual(adjusted - origin, 0.024)
@@ -388,7 +390,9 @@ class AlignStackSmokeTests(unittest.TestCase):
         catalog = pd.DataFrame({"evid": ["CI_TEST"], "time shift": [-0.031]})
         origin = self.mod.UTCDateTime("2022-09-30T11:56:20.82Z")
 
-        with patch.object(self.mod, "component", "T"), patch.object(
+        with patch.object(self.mod, "use_event_static_correction", True), patch.object(
+            self.mod, "component", "T"
+        ), patch.object(
             self.mod, "catalog_local", catalog
         ):
             adjusted = self.mod.apply_event_origin_time_shift("CI_TEST", origin)
@@ -399,12 +403,25 @@ class AlignStackSmokeTests(unittest.TestCase):
         origin = self.mod.UTCDateTime("2022-09-30T11:56:20.82Z")
         catalog = pd.DataFrame({"evid": ["CI_TEST"], "time shift": [0.015]})
 
-        with patch.object(self.mod, "use_json_event_location", False), patch.object(
+        with patch.object(self.mod, "use_event_static_correction", True), patch.object(
+            self.mod, "use_json_event_location", False
+        ), patch.object(
             self.mod, "catalog_local", catalog
         ):
             adjusted = self.mod.apply_event_origin_time_shift("CI_TEST", origin)
 
         self.assertAlmostEqual(adjusted - origin, 0.015)
+
+    def test_apply_event_origin_time_shift_uses_catalog_origin_when_static_disabled(self):
+        catalog = pd.DataFrame({"evid": ["CI_TEST"], "time shift": [0.024]})
+        origin = self.mod.UTCDateTime("2022-09-30T11:56:20.82Z")
+
+        with patch.object(self.mod, "use_event_static_correction", False), patch.object(
+            self.mod, "catalog_local", catalog
+        ):
+            adjusted = self.mod.apply_event_origin_time_shift("CI_TEST", origin)
+
+        self.assertEqual(adjusted, origin)
 
     def test_imposed_station_shifts_are_relative_to_reference_station(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -421,7 +438,7 @@ class AlignStackSmokeTests(unittest.TestCase):
             other.stats.station = "00002"
             stream = self.mod.Stream([reference, other])
 
-            with patch.object(self.mod, "use_station_static_correction", True), patch.object(
+            with patch.object(self.mod, "station_static_mode", "tabulated"), patch.object(
                 self.mod, "station_static_file", station_file
             ), patch.object(self.mod, "station_static_column", "station static s"), patch.object(
                 self.mod, "_station_static_cache", None
@@ -430,6 +447,52 @@ class AlignStackSmokeTests(unittest.TestCase):
 
         self.assertEqual(shifts["00001"], 0.0)
         self.assertAlmostEqual(shifts["00002"], 0.023)
+
+    def test_resolve_station_static_mode_accepts_all_explicit_modes(self):
+        for mode in ("none", "tabulated", "cross_correlation"):
+            with self.subTest(mode=mode):
+                self.assertEqual(
+                    self.mod.resolve_station_static_mode(
+                        {"station_static_mode": mode},
+                        "cross_correlation",
+                    ),
+                    mode,
+                )
+
+    def test_resolve_station_static_mode_rejects_invalid_mode(self):
+        with self.assertRaisesRegex(ValueError, "station_static_mode"):
+            self.mod.resolve_station_static_mode(
+                {"station_static_mode": "automatic"},
+                "cross_correlation",
+            )
+
+    def test_resolve_station_static_mode_maps_legacy_boolean(self):
+        self.assertEqual(
+            self.mod.resolve_station_static_mode(
+                {"use_station_static_correction": True},
+                "none",
+            ),
+            "tabulated",
+        )
+        self.assertEqual(
+            self.mod.resolve_station_static_mode(
+                {"use_station_static_correction": False},
+                "none",
+            ),
+            "cross_correlation",
+        )
+
+    def test_explicit_station_static_mode_takes_precedence_over_legacy_boolean(self):
+        self.assertEqual(
+            self.mod.resolve_station_static_mode(
+                {
+                    "station_static_mode": "none",
+                    "use_station_static_correction": True,
+                },
+                "cross_correlation",
+            ),
+            "none",
+        )
 
     def test_compute_event_stack_alignment_shifts_finds_delayed_stack(self):
         meta = {
@@ -517,16 +580,16 @@ class AlignStackSmokeTests(unittest.TestCase):
         self.assertTrue(bool(df.loc[0, "passed_window_correlation"]))
         self.assertFalse(bool(df.loc[1, "passed_window_correlation"]))
 
-    def test_write_component_phase_time_shifts_supports_transverse_and_vertical(self):
-        for component in ("T", "Z"):
-            with self.subTest(component=component), tempfile.TemporaryDirectory() as tmp:
+    def test_write_component_phase_time_shifts_records_actual_shared_catalog_column(self):
+        for plot_component in ("T", "Z"):
+            with self.subTest(component=plot_component), tempfile.TemporaryDirectory() as tmp:
                 with patch.object(self.mod, "path_prefix", f"{tmp}/"), patch.object(
                     self.mod, "component", "T"
                 ):
                     out = self.mod.write_component_phase_time_shifts(
                         save_dir=Path(tmp) / "event_plots",
                         eve_id="EV1",
-                        plot_comp=component,
+                        plot_comp=plot_component,
                         align_phase_name="S",
                         station_shifts={"1": {"lag_samples": 2, "lag_seconds": 0.02}},
                         calc_shifts={"1": 0.01},
@@ -538,10 +601,11 @@ class AlignStackSmokeTests(unittest.TestCase):
                     )
 
                 self.assertIsNotNone(out)
-                self.assertEqual(out.name, f"EV1_{component}_S_3-10Hz_shiftT_xcorr_statics.xlsx")
+                self.assertEqual(out.name, f"EV1_{plot_component}_S_3-10Hz_shiftR_xcorr_statics.xlsx")
                 df = pd.read_excel(out)
-                self.assertEqual(df.loc[0, "component"], component)
-                self.assertEqual(df.loc[0, "catalog_shift_component"], "T")
+                self.assertEqual(df.loc[0, "component"], plot_component)
+                self.assertEqual(df.loc[0, "catalog_shift_component"], "R")
+                self.assertEqual(df.loc[0, "catalog_time_shift_column"], "time shift")
                 self.assertEqual(df.loc[0, "phase"], "S")
 
 

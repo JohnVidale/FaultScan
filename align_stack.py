@@ -12,7 +12,6 @@ import re
 import subprocess
 
 from obspy import UTCDateTime, Stream, Trace
-from obspy.geodetics import gps2dist_azimuth
 from obspy.taup import TauPyModel
 from scipy.signal import hilbert
 from scipy.signal.windows import gaussian
@@ -31,11 +30,9 @@ from align_utils import (
     compute_time_axis_and_stack,
     correlation_time_bounds,
     draw_correlation_markers,
-    ensure_utc_datetime,
     get_component_selection,
     load_event_metadata,
     load_station_lookup,
-    make_event_output_dir,
     compute_alignment_setup,
     normalize_traces_in_window,
     report_timing_once,
@@ -51,7 +48,7 @@ from align_utils import (
 )
 
 min_freq, max_freq            = 3.0, 10.0 # Bandpass filter (Hz)
-start_time, end_time          = -10.0, 20 # Plotting time window (seconds since origin)
+start_time, end_time          = -2.0, 12 # Plotting time window (seconds since origin)
 # start_time, end_time          = -1990.0, 3690.0 # Plotting time window (seconds since origin)
 # start_time, end_time          = -1990.0, 15000 # Plotting time window (seconds since origin)
 win_pre, win_post             = 0.5,  0.5 # Correlation window parameters (seconds)
@@ -81,9 +78,10 @@ event_lon_override: float | None = None
 event_depth_override: float | None = None
 event_alignment_reference = "CI_40353472"
 event_stack_alignment_max_shift_sec = 0.2
-use_event_stack_xcorr_alignment = True
+use_event_static_correction = False  # True: catalog shifts; False: measure event-stack residuals
 event_progress_say_rate = 130
-use_station_static_correction = False
+STATION_STATIC_MODES = frozenset({"none", "tabulated", "cross_correlation"})
+station_static_mode = "cross_correlation"
 station_static_file = info_root / "stations.xlsx"
 station_static_column = "station static s"
 _station_static_cache: dict[str, float] | None = None
@@ -94,6 +92,25 @@ show_record_section_plot = False  # Show aligned record sections (single + 3-com
 
 INPUT_CONFIG_FILE = Path(__file__).resolve().with_name("rp_input.json")
 RUN_OUTPUT_DIR: Path | None = None
+
+
+def resolve_station_static_mode(cfg: dict, default_mode: str) -> str:
+    """Return the configured station-static mode, accepting the legacy Boolean."""
+    if "station_static_mode" in cfg:
+        mode = str(cfg["station_static_mode"]).strip().lower()
+        if mode not in STATION_STATIC_MODES:
+            raise ValueError(
+                "station_static_mode must be one of "
+                f"{sorted(STATION_STATIC_MODES)}; got {cfg['station_static_mode']!r}"
+            )
+        return mode
+
+    if "use_station_static_correction" in cfg:
+        return "tabulated" if bool(cfg["use_station_static_correction"]) else "cross_correlation"
+
+    if default_mode not in STATION_STATIC_MODES:
+        raise ValueError(f"Invalid default station-static mode: {default_mode!r}")
+    return default_mode
 
 
 def apply_input_config(config_file: Path) -> None:
@@ -108,9 +125,9 @@ def apply_input_config(config_file: Path) -> None:
     global event_lat_override, event_lon_override, event_depth_override
     global event_alignment_reference
     global event_stack_alignment_max_shift_sec
-    global use_event_stack_xcorr_alignment
+    global use_event_static_correction
     global event_progress_say_rate
-    global use_station_static_correction, station_static_file, station_static_column
+    global station_static_mode, station_static_file, station_static_column
     global _station_static_cache
     global show_individual_seismograms, show_record_section_plot
 
@@ -177,12 +194,10 @@ def apply_input_config(config_file: Path) -> None:
             "event_stack_alignment_max_shift_sec must be positive; "
             f"got {event_stack_alignment_max_shift_sec}"
         )
-    use_event_stack_xcorr_alignment = bool(
-        cfg.get("use_event_stack_xcorr_alignment", use_event_stack_xcorr_alignment)
+    use_event_static_correction = bool(
+        cfg.get("use_event_static_correction", use_event_static_correction)
     )
-    use_station_static_correction = bool(
-        cfg.get("use_station_static_correction", use_station_static_correction)
-    )
+    station_static_mode = resolve_station_static_mode(cfg, station_static_mode)
     station_static_file = Path(cfg.get("station_static_file", station_static_file))
     station_static_column = str(
         cfg.get("station_static_column", station_static_column)
@@ -251,8 +266,9 @@ except Exception as e:
 model = TauPyModel(model="iasp91")
 
 
-def write_run_parameter_snapshot(output_dir: Path) -> Path:
+def write_run_parameter_snapshot(output_dir: Path | str) -> Path:
     """Write a timestamped JSON snapshot of run parameters for reproducibility."""
+    output_dir = Path(output_dir)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-2]
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -286,9 +302,9 @@ def write_run_parameter_snapshot(output_dir: Path) -> Path:
         "events": list(events),
         "event_alignment_reference": event_alignment_reference,
         "event_stack_alignment_max_shift_sec": event_stack_alignment_max_shift_sec,
-        "use_event_stack_xcorr_alignment": use_event_stack_xcorr_alignment,
+        "use_event_static_correction": use_event_static_correction,
         "event_progress_say_rate": event_progress_say_rate,
-        "use_station_static_correction": use_station_static_correction,
+        "station_static_mode": station_static_mode,
         "station_static_file": _snapshot_path(station_static_file),
         "station_static_column": station_static_column,
         "use_json_event_location": use_json_event_location,
@@ -341,11 +357,16 @@ def write_component_phase_time_shifts(
     max_freq_hz: float,
 ) -> Path | None:
     """Write station residual shifts for one event/component to the statics directory."""
-    catalog_shift_component = component.upper()
-    if catalog_shift_component not in {"R", "T"}:
+    catalog_shift_column = catalog_time_shift_column()
+    catalog_shift_component_by_column = {
+        "time shift": "R",
+        "time shift T": "T",
+    }
+    catalog_shift_component = catalog_shift_component_by_column.get(catalog_shift_column)
+    if catalog_shift_component is None:
         raise ValueError(
-            "component must be 'R' or 'T' when writing statics; "
-            f"got {component!r}"
+            "Cannot derive the legacy R/T statics label from catalog column "
+            f"{catalog_shift_column!r}"
         )
     stations = sorted(set(station_shifts) & set(calc_shifts), key=lambda station: int(station))
     if not stations:
@@ -362,6 +383,7 @@ def write_component_phase_time_shifts(
                 "station": station,
                 "component": plot_comp,
                 "catalog_shift_component": catalog_shift_component,
+                "catalog_time_shift_column": catalog_shift_column,
                 "phase": align_phase_name,
                 "frequency_min_hz": float(min_freq_hz),
                 "frequency_max_hz": float(max_freq_hz),
@@ -420,7 +442,10 @@ def catalog_time_shift_column() -> str:
 
 
 def apply_event_origin_time_shift(eve_id: str, origin: UTCDateTime) -> UTCDateTime:
-    """Apply the shared catalog event shift independently of location selection."""
+    """Apply the shared catalog event static when configured to use it."""
+    if not use_event_static_correction:
+        return origin
+
     if catalog_local is None:
         raise RuntimeError("Catalog is unavailable; cannot apply the event time shift")
     shift_column = catalog_time_shift_column()
@@ -444,7 +469,10 @@ def apply_event_origin_time_shift(eve_id: str, origin: UTCDateTime) -> UTCDateTi
 
 
 def event_time_shift_for_plot(eve_id: str) -> float:
-    """Return the shared catalog event shift for plotting markers."""
+    """Return the catalog event shift actually applied by this run."""
+    if not use_event_static_correction:
+        return 0.0
+
     if catalog_local is None:
         return 0.0
     shift_column = catalog_time_shift_column()
@@ -463,7 +491,7 @@ def imposed_station_shifts_for_stream(
 ) -> dict[str, float] | None:
     """Load station statics and express them relative to the selected reference station."""
     global _station_static_cache
-    if not use_station_static_correction:
+    if station_static_mode != "tabulated":
         return None
 
     if _station_static_cache is None:
@@ -2327,7 +2355,7 @@ def plot_all_events_component_offsets_aligned(
                 series,
                 reference_event,
                 max_shift_sec,
-                measure_xcorr_residual=use_event_stack_xcorr_alignment,
+                measure_xcorr_residual=not use_event_static_correction,
             )
         except ValueError as exc:
             print(f"[WARN] Skipping aligned {comp_name} stack plot: {exc}")
@@ -2342,6 +2370,7 @@ def plot_all_events_component_offsets_aligned(
         alignment_df["catalog_time_shift_seconds"] = alignment_df["event_id"].map(
             event_time_shift_for_plot
         )
+        alignment_df["catalog_time_shift_column"] = catalog_time_shift_column()
         reference_meta = next(meta for eve_id, _, _, _, meta in series if eve_id == reference_event)
         reference_t_ref = reference_meta.get("t_ref")
         (
@@ -2826,6 +2855,7 @@ def compute_alignment_products(
         timing_state=timing_state,
     )
     imposed_station_shifts = imposed_station_shifts_for_stream(st_comp, ref_station_id)
+    measure_station_residuals = station_static_mode == "cross_correlation"
 
     # ===================== Stage 1: align to reference -> aligned_stack =====================
     aligned_stack = compute_stage1_aligned_stack(
@@ -2838,6 +2868,7 @@ def compute_alignment_products(
         move_limit_samples=move_limit_samples,
         calc_shifts=calc_shifts,
         imposed_station_shifts=imposed_station_shifts,
+        measure_station_residuals=measure_station_residuals,
         timing_state=timing_state,
     )
 
@@ -2852,6 +2883,7 @@ def compute_alignment_products(
         move_limit_samples=move_limit_samples,
         calc_shifts=calc_shifts,
         imposed_station_shifts=imposed_station_shifts,
+        measure_station_residuals=measure_station_residuals,
         r_window_min=r_window_min,
         timing_state=timing_state,
     )
@@ -2871,6 +2903,7 @@ def compute_alignment_products(
         selected_ids=selected_ids,
         calc_shifts=calc_shifts,
         imposed_station_shifts=imposed_station_shifts,
+        measure_station_residuals=measure_station_residuals,
         npts=npts,
         sample_rate=sample_rate,
         win_start=win_start,
@@ -2883,7 +2916,7 @@ def compute_alignment_products(
     )
     selected_rows = stage3_products["selected_rows"]
     rejected_rows = stage3_products["rejected_rows"]
-    aligned_bank_all = stage3_products["aligned_bank_all"]
+    aligned_bank = stage3_products["aligned_bank"]
     station_shifts = stage3_products["station_shifts"]
     aligned_traces_by_station = stage3_products["aligned_traces_by_station"]
 
@@ -2893,7 +2926,7 @@ def compute_alignment_products(
         end_time=end_time,
         npts=npts,
         sample_rate=sample_rate,
-        aligned_bank_all=aligned_bank_all,
+        aligned_bank=aligned_bank,
         win_start=win_start,
         win_end=win_end,
     )
@@ -3054,9 +3087,9 @@ def run_pipeline() -> None:
                     },
                 )
             )
-            if use_station_static_correction:
+            if station_static_mode == "tabulated":
                 print("Using imposed station statics; not writing newly measured station statics.")
-            else:
+            elif station_static_mode == "cross_correlation":
                 write_component_phase_time_shifts(
                     save_dir=save_dir,
                     eve_id=eve_id,
@@ -3069,6 +3102,11 @@ def run_pipeline() -> None:
                     sample_rate=sample_rate,
                     min_freq_hz=min_freq,
                     max_freq_hz=max_freq,
+                )
+            else:
+                print(
+                    "Station-static mode is 'none'; using TauP station shifts only "
+                    "and not writing a measured-statics workbook."
                 )
 
             _plot_wall_start, _plot_cpu_start = start_plot_timing()

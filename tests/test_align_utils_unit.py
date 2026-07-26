@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -7,6 +8,13 @@ import align_utils
 
 
 class AlignUtilsUnitTests(unittest.TestCase):
+    @staticmethod
+    def _trace(station, data):
+        return SimpleNamespace(
+            data=np.asarray(data, dtype=float),
+            stats=SimpleNamespace(station=station),
+        )
+
     def test_resolve_component_key_variants(self):
         self.assertEqual(align_utils.resolve_component_key("DPZ", "R"), "DPZ")
         self.assertEqual(align_utils.resolve_component_key("DPN", "R"), "R")
@@ -124,6 +132,110 @@ class AlignUtilsUnitTests(unittest.TestCase):
         self.assertNotEqual(payload["all_rows"][0][2][0], -999.0)
         self.assertNotEqual(payload["snippet_by_station"]["1"][0], -999.0)
         self.assertNotEqual(payload["aligned_traces_by_station"]["1"][0], -999.0)
+
+    def test_stage3_none_mode_uses_taup_shift_without_correlation(self):
+        traces = [
+            self._trace("1", [0, 0, 1, 0, 0, 0]),
+            self._trace("2", [0, 0, 0, 0, 1, 0]),
+        ]
+
+        with patch.object(align_utils, "compute_lag") as compute_lag:
+            products = align_utils.compute_stage3_finalized_rows(
+                st_comp=traces,
+                ref=traces[0].data,
+                ref_station_id="1",
+                selected_ids={"1", "2"},
+                calc_shifts={"2": 0.2},
+                imposed_station_shifts=None,
+                measure_station_residuals=False,
+                npts=6,
+                sample_rate=10.0,
+                win_start=1,
+                win_end=5,
+                move_limit_samples=2,
+                name2ll={"1": (0.0, 0.0), "2": (0.0, 0.1)},
+                eve_lat=0.0,
+                eve_lon=0.0,
+                timing_state=align_utils.TimingState(),
+            )
+
+        compute_lag.assert_not_called()
+        self.assertEqual(products["station_shifts"]["2"]["lag_samples"], 2)
+
+    def test_stage3_cross_correlation_adds_residual_to_taup_shift(self):
+        traces = [
+            self._trace("1", [0, 0, 1, 0, 0, 0]),
+            self._trace("2", [0, 0, 0, 0, 1, 0]),
+        ]
+
+        with patch.object(align_utils, "compute_lag", return_value=1) as compute_lag:
+            products = align_utils.compute_stage3_finalized_rows(
+                st_comp=traces,
+                ref=traces[0].data,
+                ref_station_id="1",
+                selected_ids={"1", "2"},
+                calc_shifts={"2": 0.2},
+                imposed_station_shifts=None,
+                measure_station_residuals=True,
+                npts=6,
+                sample_rate=10.0,
+                win_start=1,
+                win_end=5,
+                move_limit_samples=2,
+                name2ll={"1": (0.0, 0.0), "2": (0.0, 0.1)},
+                eve_lat=0.0,
+                eve_lon=0.0,
+                timing_state=align_utils.TimingState(),
+            )
+
+        compute_lag.assert_called_once()
+        self.assertEqual(products["station_shifts"]["2"]["lag_samples"], 3)
+
+    def test_rejected_trace_is_excluded_from_final_stack(self):
+        selected_trace = np.array([0.0, 1.0, 0.0])
+        rejected_trace = np.array([1.0, 0.0, 1.0])
+        traces = [
+            self._trace("1", selected_trace),
+            self._trace("2", rejected_trace),
+        ]
+
+        finalized = align_utils.compute_stage3_finalized_rows(
+            st_comp=traces,
+            ref=selected_trace,
+            ref_station_id="1",
+            selected_ids={"1"},
+            calc_shifts={},
+            imposed_station_shifts=None,
+            measure_station_residuals=False,
+            npts=3,
+            sample_rate=10.0,
+            win_start=0,
+            win_end=3,
+            move_limit_samples=1,
+            name2ll={"1": (0.0, 0.0), "2": (0.0, 0.1)},
+            eve_lat=0.0,
+            eve_lon=0.0,
+            timing_state=align_utils.TimingState(),
+        )
+
+        products = align_utils.compute_time_axis_and_stack(
+            start_time=0.0,
+            end_time=0.2,
+            npts=3,
+            sample_rate=10.0,
+            aligned_bank=finalized["aligned_bank"],
+            win_start=0,
+            win_end=3,
+        )
+
+        self.assertEqual(len(finalized["aligned_bank"]), 1)
+        np.testing.assert_allclose(products["stack_vec"], selected_trace)
+        self.assertFalse(
+            np.allclose(
+                products["stack_vec"],
+                np.mean(np.vstack([selected_trace, rejected_trace]), axis=0),
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -1,584 +1,666 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib.ticker import NullFormatter
+"""Compare the per-event component stacks produced by one align_stack run."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from dataclasses import dataclass
 from pathlib import Path
-from datetime import timezone
-from obspy import read, UTCDateTime
 
-# IN_DIR = "1_5_Hz"
-IN_DIR = "3_10_Hz"
-OUTPUT_ROOT = Path("/Users/jvidale/Documents/Research/FaultScanR/Sgrams/" + IN_DIR)
-CATALOG_FILE = Path("/Users/jvidale/Documents/Research/FaultScanR/event_sta_info/catalog_local_hand.xlsx")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from obspy import Trace, UTCDateTime, read
+
+
+OUTPUT_ROOT = Path("/Users/jvidale/Documents/Research/FaultScanR/output")
+IMPLICIT_RUN_PREFIX = "2026"
+CATALOG_FILE = Path(
+    "/Users/jvidale/Documents/Research/FaultScanR/event_sta_info/catalog_local_hand.xlsx"
+)
 ORIGIN_COL = "origin_time"
-SHOW_ORIGINAL_PLOT = False
-SHOW_CHOPPED_PLOT = False
-SHOW_LEGEND = False
-SHOW_RADIAL_ONLY = False
-SHOW_OFFSET_TRACES = True
-SHOW_SUPERIMPOSED_MASKED = True
-SHOW_MEDIAN_TRACE = True
-
-MAG_MIN = 0.0
-MAG_DIFF_MIN = 0.8
-EVENT_WINDOW_START = 0.0
-EVENT_WINDOW_END = 25.0
-ALIGN_WINDOW_START = 4.6 # 3 to 10 Hz
-ALIGN_WINDOW_END   = 6.0
-# ALIGN_WINDOW_START = 4.4 # 1 to 5 Hz
-# ALIGN_WINDOW_END   = 5.6
-OFFSET_STEP = 0.6
-REPLACE_LEVEL = np.nan # can be np.nan, 0, or 1
-
-COMPONENTS = ["DPZ", "R", "T"]
+COMPONENT_FILE_NAMES = {"Z": "DPZ", "R": "R", "T": "T"}
 COMPONENT_LABELS = {
-    "DPZ": "Vertical (Z)",
+    "Z": "Vertical (Z)",
     "R": "Radial (R)",
     "T": "Transverse (T)",
 }
 
+ALIGN_WINDOW_START = 4.6
+ALIGN_WINDOW_END = 6.0
+MAG_MIN = 0.0
+MAG_DIFF_MIN = 0.8
+OFFSET_STEP = 0.6
+REPLACE_LEVEL = np.nan
+SHOW_OFFSET_TRACES = True
+SHOW_MEDIAN_TRACE = True
+MASK_POLICIES = ("comparable_or_larger", "smaller", "all", "none")
+
+# Defaults used when stacker.py is run with the triangle button in VS Code.
+# Edit these values to change an argument-free interactive run.
+DEFAULT_RUN = "0724_185013_6649"
+DEFAULT_COMPONENTS = ["Z", "R", "T"]
+DEFAULT_MASK_OTHER_EVENTS = "smaller"
+DEFAULT_OVERLAY_ONLY = True
+DEFAULT_SHOW_PLOTS = True
+DEFAULT_SAVE_PLOTS = False
+DEFAULT_AMPLITUDE_LIMITS = (-0.1, 0.1)
+
+
+@dataclass
+class EventStack:
+    event_id: str
+    origin: UTCDateTime
+    magnitude: float | None
+    trace: Trace
+
+
+@dataclass
+class ProcessedStack:
+    event_id: str
+    origin: UTCDateTime
+    time: np.ndarray
+    pre_mask: np.ndarray
+    post_mask: np.ndarray
+
+
+def resolve_run_directory(run_suffix: str) -> Path:
+    """Resolve a short run suffix beneath the fixed 2026 output prefix."""
+    value = run_suffix.strip()
+    if value.startswith(IMPLICIT_RUN_PREFIX):
+        run_id = value
+    else:
+        run_id = f"{IMPLICIT_RUN_PREFIX}{value}"
+
+    if not re.fullmatch(r"2026\d{4}_\d{6}_\d{4}", run_id):
+        raise ValueError(
+            "Run must be the suffix after 2026, such as '0722_182322_4666' "
+            "(the complete 2026-prefixed run name is also accepted)."
+        )
+    return OUTPUT_ROOT / run_id
+
+
+def normalize_components(components: list[str]) -> list[str]:
+    """Normalize component names, reject unknown values, and preserve order."""
+    normalized = []
+    for component in components:
+        value = component.upper()
+        if value not in COMPONENT_FILE_NAMES:
+            raise ValueError(
+                f"Unknown component {component!r}; choose from Z, R, and T"
+            )
+        if value not in normalized:
+            normalized.append(value)
+    return normalized
+
 
 def load_catalog(path: Path) -> pd.DataFrame:
-    df = pd.read_excel(path)
-    if ORIGIN_COL not in df.columns:
-        raise ValueError(f"Catalog missing '{ORIGIN_COL}' column")
-    if "evid" not in df.columns:
-        raise ValueError("Catalog missing 'evid' column")
-    return df
+    catalog = pd.read_excel(path, dtype={"evid": str})
+    required = {"evid", ORIGIN_COL}
+    missing = required - set(catalog.columns)
+    if missing:
+        raise ValueError(f"Catalog is missing required columns: {sorted(missing)}")
+    return catalog
 
 
-def load_stack_traces(root_dir: Path) -> dict:
-    traces = {}
-    for comp in COMPONENTS:
-        mseed_file = root_dir / f"{comp}_stack.mseed"
-        if not mseed_file.exists():
-            continue
-        st = read(str(mseed_file))
-        if len(st) == 0:
-            continue
-        traces[comp] = st[0]
-    return traces
+def load_run_parameters(run_dir: Path) -> dict:
+    """Read and cross-check the parameter snapshots stored under a run."""
+    snapshot_paths = sorted(run_dir.glob("*/rp_*.json"))
+    if not snapshot_paths:
+        raise FileNotFoundError(f"No run-parameter snapshot found under {run_dir}")
 
+    snapshots = []
+    for path in snapshot_paths:
+        with path.open("r", encoding="utf-8") as handle:
+            snapshots.append((path, json.load(handle)))
 
-def plot_stacks(
-    origin_time: UTCDateTime,
-    traces: dict,
-    title: str,
-    catalog: pd.DataFrame,
-    catalog_all: pd.DataFrame,
-    show_original: bool,
-) -> None:
-    if not traces:
-        print("[WARN] No stack mseed files found in output directory")
-        return
-
-    plot_components = ["R"] if SHOW_RADIAL_ONLY else COMPONENTS
-
-    tmin = None
-    tmax = None
-    for tr in traces.values(): # find overall time range across all traces
-        t_start = tr.stats.starttime
-        t_end = tr.stats.endtime
-        if tmin is None or t_start < tmin:
-            tmin = t_start
-        if tmax is None or t_end > tmax:
-            tmax = t_end
-
-    if show_original: # plot original traces with event lines
-        fig, axes = plt.subplots(len(plot_components), 1, figsize=(12, 6), sharex=True)
-        if len(plot_components) == 1:
-            axes = [axes]
-
-        origin_dt = origin_time.datetime
-        if origin_dt.tzinfo is None:
-            origin_dt = origin_dt.replace(tzinfo=timezone.utc)
-
-        event_times = []
-        for _, row in catalog.iterrows(): # gather event times for lines, skipping those marked with skip=1 or 2
-            # if str(row.get("skip", "0")) == "1":
-            if str(row.get("skip", "0")) in ("1", "2"):
-                continue
-            try:
-                evt = UTCDateTime(str(row[ORIGIN_COL])).datetime
-                if evt.tzinfo is None:
-                    evt = evt.replace(tzinfo=timezone.utc)
-                event_times.append(evt)
-            except Exception:
-                continue
-
-        for idx, comp in enumerate(plot_components):
-            ax = axes[idx]
-            tr = traces.get(comp)
-            if tr is None:
-                ax.set_axis_off()
-                continue
-
-            t0 = tr.stats.starttime
-            npts = tr.stats.npts
-            sr = float(tr.stats.sampling_rate)
-            t_abs = [
-                (t0 + (i / sr)).datetime.replace(tzinfo=timezone.utc)
-                for i in range(npts)
-            ]
-
-            ax.plot(t_abs, tr.data, lw=1.0, color="k")
-            ax.axvline(origin_dt, color="r", lw=1.2, alpha=0.7, linestyle="--")
-            for evt in event_times:
-                ax.axvline(evt, color="0.5", lw=0.8, alpha=0.6)
-            ax.set_ylabel(comp)
-            ax.grid(alpha=0.2)
-
-        axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-        axes[-1].xaxis.set_minor_formatter(NullFormatter())
-        axes[-1].set_xlabel(f"UTC time (origin {origin_dt.isoformat()})")
-
-    def _apply_round_ticks(ax) -> None:
-        xmin, xmax = ax.get_xlim()
-        span_seconds = max(1.0, (xmax - xmin) * 86400.0)
-        span_minutes = span_seconds / 60.0
-        target_ticks = 10.0
-        raw_interval = span_minutes / target_ticks
-        candidates = [0.5, 1, 2, 5, 10, 15, 20, 30, 60, 120, 180, 240, 360]
-        interval = min(candidates, key=lambda v: abs(v - raw_interval))
-        if interval < 1:
-            seconds = int(round(interval * 60.0))
-            major_seconds = max(1, seconds)
-            ax.xaxis.set_major_locator(mdates.SecondLocator(interval=major_seconds))
-            ax.xaxis.set_minor_locator(mdates.SecondLocator(interval=max(1, major_seconds // 5)))
-        else:
-            major_minutes = int(round(interval))
-            ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=major_minutes))
-            if major_minutes >= 5:
-                ax.xaxis.set_minor_locator(mdates.MinuteLocator(interval=max(1, major_minutes // 5)))
-            else:
-                ax.xaxis.set_minor_locator(mdates.SecondLocator(interval=max(1, int(major_minutes * 60 / 5))))
-
-    if show_original and tmin is not None and tmax is not None:
-        tmin_dt = tmin.datetime.replace(tzinfo=timezone.utc)
-        tmax_dt = tmax.datetime.replace(tzinfo=timezone.utc)
-        axes[-1].set_xlim(tmin_dt, tmax_dt)
-        _apply_round_ticks(axes[-1])
-        def _on_view_change(_event=None) -> None:
-            _apply_round_ticks(axes[-1])
-            fig.canvas.draw_idle()
-
-        fig.canvas.mpl_connect("button_release_event", _on_view_change)
-        axes[-1].callbacks.connect("xlim_changed", _on_view_change)
-
-    if show_original:
-        axes[-1].tick_params(axis="x", which="major", length=6)
-        axes[-1].tick_params(axis="x", which="minor", length=3)
-        fig.suptitle(title, fontsize=12, fontweight="bold")
-        fig.autofmt_xdate()
-
-    # Overlay: normalized components, 0-30 s after each event within data window
-    def _shift_zeropad(x: np.ndarray, n: int) -> np.ndarray:
-        y = np.zeros_like(x)
-        if n == 0:
-            y[:] = x
-            return y
-        if n > 0:
-            if n >= x.size:
-                return y
-            y[:-n] = x[n:]
-            return y
-        n = -n
-        if n >= x.size:
-            return y
-        y[n:] = x[:-n]
-        return y
-
-    if tmin is not None and tmax is not None:
-        tmin_evt = tmin
-        tmax_evt = tmax - EVENT_WINDOW_END
-        mag_col = None
-        if "magnitude" in catalog_all.columns:
-            mag_col = "magnitude"
-        elif "mag" in catalog_all.columns:
-            mag_col = "mag"
-        event_info = []
-        for _, row in catalog_all.iterrows():
-            try:
-                evt_time = UTCDateTime(str(row[ORIGIN_COL]))
-            except Exception:
-                continue
-            mag_val = None
-            if mag_col is not None and mag_col in row:
-                try:
-                    mag_val = float(row[mag_col])
-                except Exception:
-                    mag_val = None
-            event_info.append((evt_time, mag_val))
-
-        fig_seg, axes_seg = plt.subplots(
-            len(plot_components),
-            1,
-            figsize=(10, 6.5 if len(plot_components) == 1 else 8.5),
-            sharex=True,
-        )
-        if len(plot_components) == 1:
-            axes_seg = [axes_seg]
-        comp_order = plot_components
-        counts = {c: 0 for c in comp_order}
-
-        mag_col = None
-        if "magnitude" in catalog.columns:
-            mag_col = "magnitude"
-        elif "mag" in catalog.columns:
-            mag_col = "mag"
-
-        processed_by_comp = {comp: [] for comp in comp_order}
-        processed_pre_mask = {comp: [] for comp in comp_order}
-
-        for comp, ax in zip(comp_order, axes_seg): # loop through components in specified order
-            tr_c = traces.get(comp)
-            if tr_c is None:
-                ax.set_axis_off()
-                continue
-
-            segments = []
-            legend_labels = []
-            segment_times = []
-            segment_mags = []
-            for _, row in catalog.iterrows():
-                if str(row.get("skip", "0")) in ("1", "2"):
-                    continue
-                try:
-                    evt = UTCDateTime(str(row[ORIGIN_COL]))
-                except Exception:
-                    continue
-                if evt < tmin_evt or evt > tmax_evt:
-                    continue
-
-                seg = tr_c.slice(
-                    starttime=evt + EVENT_WINDOW_START,
-                    endtime=evt + EVENT_WINDOW_END,
-                )
-                if seg.stats.npts == 0:
-                    continue
-                segments.append(seg)
-                segment_times.append(evt)
-
-                evid = str(row.get("evid", ""))
-                mag_val = None
-                if mag_col is not None and mag_col in row:
-                    try:
-                        mag_val = float(row[mag_col])
-                    except Exception:
-                        mag_val = None
-                if SHOW_LEGEND:
-                    if mag_val is not None:
-                        legend_labels.append(f"{evid} M{mag_val:.2f}")
-                    else:
-                        legend_labels.append(f"{evid}")
-                segment_mags.append(mag_val)
-
-            if segments:
-                ref = segments[0].data.astype(float)
-                sr = float(segments[0].stats.sampling_rate)
-                w0 = int(round(ALIGN_WINDOW_START * sr))
-                w1 = int(round(ALIGN_WINDOW_END * sr))
-                ref_win = ref[w0:w1]
-                ref_win = ref_win - np.mean(ref_win) if ref_win.size > 0 else ref_win
-                ref_den = np.linalg.norm(ref_win) if ref_win.size > 0 else 0.0
-                if ref_den > 0:
-                    ref_win = ref_win / ref_den
-
-                if not SHOW_LEGEND:
-                    legend_labels = ["" for _ in segments]
-                for seg, label, evt_time, evt_mag in zip(
-                    segments,
-                    legend_labels,
-                    segment_times,
-                    segment_mags,
-                ):
-                    y = seg.data.astype(float)
-                    y_win = y[w0:w1]
-                    if ref_win.size > 0 and y_win.size == ref_win.size:
-                        y_win = y_win - np.mean(y_win)
-                        y_den = np.linalg.norm(y_win)
-                        if y_den > 0:
-                            y_win = y_win / y_den
-                            corr = np.correlate(y_win, ref_win, mode="full")
-                            lag = int(np.argmax(corr) - (y_win.size - 1))
-                            y = _shift_zeropad(y, lag)
-
-                    mx = float(max(abs(y.min()), abs(y.max()))) if y.size > 0 else 0.0
-                    if mx > 0:
-                        y = y / mx
-
-                    dt = float(seg.stats.delta)
-                    y_pre = y.copy()
-                    for other_evt, other_mag in event_info:
-                        offset = float(other_evt - evt_time)
-                        if abs(offset) < 1e-6:
-                            continue
-                        if offset < -ALIGN_WINDOW_END or offset > EVENT_WINDOW_END - ALIGN_WINDOW_START:
-                            continue
-                        if (
-                            evt_mag is None
-                            or other_mag is None
-                               or other_mag < (evt_mag - MAG_DIFF_MIN)
-                        ):
-                            continue
-                        t0 = offset + ALIGN_WINDOW_START - EVENT_WINDOW_START
-                        t1 = offset + ALIGN_WINDOW_END - EVENT_WINDOW_START
-                        i0 = int(round(t0 / dt))
-                        i1 = int(round(t1 / dt))
-                        if i1 < 0 or i0 >= y.size:
-                            continue
-                        i0 = max(0, i0)
-                        i1 = min(y.size - 1, i1)
-                        if i1 >= i0:
-                            y[i0 : i1 + 1] = REPLACE_LEVEL
-
-                    t_rel = [seg.stats.delta * i for i in range(seg.stats.npts)]
-                    processed_pre_mask[comp].append((t_rel, y_pre, evt_time))
-                    processed_by_comp[comp].append((t_rel, y, evt_time))
-                    ax.plot(t_rel, y, lw=1.0, alpha=0.6, label=label)
-                    counts[comp] += 1
-
-                if processed_by_comp[comp]:
-                    t_rel = processed_by_comp[comp][0][0]
-                    y_stack = np.vstack(
-                        [np.asarray(t[1], dtype=float) for t in processed_by_comp[comp]]
-                    )
-                    y_med = np.nanmedian(y_stack, axis=0)
-                    ax.plot(t_rel, y_med, lw=2.4, color="k", label="Median")
-
-            ax.axhline(0.0, color="k", lw=0.6, alpha=0.5)
-            ax.set_ylabel(COMPONENT_LABELS.get(comp, comp))
-            ax.grid(alpha=0.2)
-            if SHOW_LEGEND:
-                ax.legend(loc="upper right", fontsize=7, ncol=1)
-
-        axes_seg[-1].set_xlim(EVENT_WINDOW_START, EVENT_WINDOW_END)
-        axes_seg[-1].set_xlabel("Time since origin (s)")
-        fig_seg.suptitle(
-            f"Stacks: {EVENT_WINDOW_START:.1f}–{EVENT_WINDOW_END:.1f} s after events",
-            fontsize=12,
-            fontweight="bold",
-        )
-        fig_seg.tight_layout()
-        out_file = OUTPUT_ROOT / "stack_segments_overlay.png"
-        fig_seg.savefig(out_file, dpi=300, bbox_inches="tight")
-        print(f"✓ Wrote plot: {out_file}")
-
-        if SHOW_MEDIAN_TRACE:
-            fig_med, axes_med = plt.subplots(
-                len(plot_components),
-                1,
-                figsize=(10, 6.5 if len(plot_components) == 1 else 8.5),
-                sharex=True,
-            )
-            if len(plot_components) == 1:
-                axes_med = [axes_med]
-
-            for comp, ax in zip(plot_components, axes_med):
-                traces_list = processed_by_comp.get(comp, [])
-                if len(traces_list) == 0:
-                    ax.set_axis_off()
-                    continue
-
-                t_rel = traces_list[0][0]
-                y_stack = np.vstack([np.asarray(t[1], dtype=float) for t in traces_list])
-                y_med = np.nanmedian(y_stack, axis=0)
-
-                ax.plot(t_rel, y_med, lw=1.4, color="k")
-                ax.axhline(0.0, color="k", lw=0.6, alpha=0.5)
-                ax.set_ylabel(COMPONENT_LABELS.get(comp, comp))
-                ax.grid(alpha=0.2)
-
-            axes_med[-1].set_xlim(EVENT_WINDOW_START, EVENT_WINDOW_END)
-            axes_med[-1].set_xlabel("Time since origin (s)")
-            fig_med.suptitle(
-                "Median of selected traces (post-mask)",
-                fontsize=12,
-                fontweight="bold",
-            )
-            fig_med.tight_layout()
-            out_file = OUTPUT_ROOT / "stack_segments_median.png"
-            fig_med.savefig(out_file, dpi=300, bbox_inches="tight")
-            print(f"✓ Wrote plot: {out_file}")
-
-        if SHOW_CHOPPED_PLOT:
-            fig_chop, axes_chop = plt.subplots(
-                len(plot_components),
-                1,
-                figsize=(10, 6.5 if len(plot_components) == 1 else 8.5),
-                sharex=True,
-            )
-            if len(plot_components) == 1:
-                axes_chop = [axes_chop]
-
-            for comp, ax in zip(plot_components, axes_chop):
-                tr_c = traces.get(comp)
-                if tr_c is None:
-                    ax.set_axis_off()
-                    continue
-
-                for _, row in catalog.iterrows():
-                    if str(row.get("skip", "0")) in ("1", "2"):
-                        continue
-                    try:
-                        evt = UTCDateTime(str(row[ORIGIN_COL]))
-                    except Exception:
-                        continue
-                    if evt < tmin_evt or evt > tmax_evt:
-                        continue
-
-                    seg = tr_c.slice(
-                        starttime=evt + EVENT_WINDOW_START,
-                        endtime=evt + EVENT_WINDOW_END,
-                    )
-                    if seg.stats.npts == 0:
-                        continue
-                    y = seg.data.astype(float)
-                    mx = float(max(abs(y.min()), abs(y.max()))) if y.size > 0 else 0.0
-                    if mx > 0:
-                        y = y / mx
-                    t_rel = [seg.stats.delta * i for i in range(seg.stats.npts)]
-                    ax.plot(t_rel, y, lw=0.9, alpha=0.5)
-
-                ax.axhline(0.0, color="k", lw=0.6, alpha=0.5)
-                ax.set_ylabel(COMPONENT_LABELS.get(comp, comp))
-                ax.grid(alpha=0.2)
-
-            axes_chop[-1].set_xlim(EVENT_WINDOW_START, EVENT_WINDOW_END)
-            axes_chop[-1].set_xlabel("Time since origin (s)")
-            fig_chop.suptitle(
-                "Chopped window (normalized)",
-                fontsize=12,
-                fontweight="bold",
-            )
-            fig_chop.tight_layout()
-            out_file = OUTPUT_ROOT / "stack_segments_chopped.png"
-            fig_chop.savefig(out_file, dpi=300, bbox_inches="tight")
-            print(f"✓ Wrote plot: {out_file}")
-
-        if SHOW_OFFSET_TRACES:
-            fig_off, axes_off = plt.subplots(
-                len(plot_components),
-                1,
-                figsize=(10, 6.5 if len(plot_components) == 1 else 8.5),
-                sharex=True,
-            )
-            if len(plot_components) == 1:
-                axes_off = [axes_off]
-
-            for comp, ax in zip(plot_components, axes_off):
-                if comp not in processed_pre_mask or len(processed_pre_mask[comp]) == 0:
-                    ax.set_axis_off()
-                    continue
-
-                offset = 0.0
-                sorted_pre = sorted(processed_pre_mask[comp], key=lambda t: t[2])
-                for t_rel, y, evt_time in reversed(sorted_pre):
-                    ax.plot(t_rel, y + offset, lw=0.9, alpha=0.7)
-                    ax.text(
-                        t_rel[0],
-                        y[0] + offset,
-                        evt_time.datetime.strftime("%H:%M:%S"),
-                        fontsize=6,
-                        va="bottom",
-                    )
-                    offset += OFFSET_STEP
-
-                ax.set_ylabel(COMPONENT_LABELS.get(comp, comp))
-                ax.grid(alpha=0.2)
-
-            axes_off[-1].set_xlim(EVENT_WINDOW_START, EVENT_WINDOW_END)
-            axes_off[-1].set_xlabel("Time since origin (s)")
-            fig_off.suptitle(
-                "Chopped window (offset traces, pre-mask)",
-                fontsize=12,
-                fontweight="bold",
-            )
-            fig_off.tight_layout()
-            out_file = OUTPUT_ROOT / "stack_segments_offset_pre_mask.png"
-            fig_off.savefig(out_file, dpi=300, bbox_inches="tight")
-            print(f"✓ Wrote plot: {out_file}")
-
-            fig_off2, axes_off2 = plt.subplots(
-                len(plot_components),
-                1,
-                figsize=(10, 6.5 if len(plot_components) == 1 else 8.5),
-                sharex=True,
-            )
-            if len(plot_components) == 1:
-                axes_off2 = [axes_off2]
-
-            for comp, ax in zip(plot_components, axes_off2):
-                if comp not in processed_by_comp or len(processed_by_comp[comp]) == 0:
-                    ax.set_axis_off()
-                    continue
-
-                offset = 0.0
-                sorted_post = sorted(processed_by_comp[comp], key=lambda t: t[2])
-                for t_rel, y, evt_time in reversed(sorted_post):
-                    y = np.asarray(y, dtype=float)
-                    mx = float(np.max(np.abs(y))) if y.size > 0 else 0.0
-                    if mx > 0:
-                        y = y / mx
-                    ax.plot(t_rel, y + offset, lw=0.9, alpha=0.7)
-                    ax.text(
-                        t_rel[0],
-                        y[0] + offset,
-                        evt_time.datetime.strftime("%H:%M:%S"),
-                        fontsize=6,
-                        va="bottom",
-                    )
-                    offset += OFFSET_STEP
-
-                ax.set_ylabel(COMPONENT_LABELS.get(comp, comp))
-                ax.grid(alpha=0.2)
-
-            axes_off2[-1].set_xlim(EVENT_WINDOW_START, EVENT_WINDOW_END)
-            axes_off2[-1].set_xlabel("Time since origin (s)")
-            fig_off2.suptitle(
-                "Chopped window (offset traces, post-mask)",
-                fontsize=12,
-                fontweight="bold",
-            )
-            fig_off2.tight_layout()
-            out_file = OUTPUT_ROOT / "stack_segments_offset_post_mask.png"
-            fig_off2.savefig(out_file, dpi=300, bbox_inches="tight")
-            print(f"✓ Wrote plot: {out_file}")
-
-    plt.show()
-
-
-def main() -> None:
-    catalog_all = load_catalog(CATALOG_FILE)
-    if catalog_all.empty:
-        raise ValueError("Catalog is empty")
-
-    mag_col = None
-    if "magnitude" in catalog_all.columns:
-        mag_col = "magnitude"
-    elif "mag" in catalog_all.columns:
-        mag_col = "mag"
-    if mag_col is None:
-        raise ValueError("Catalog missing magnitude column (magnitude or mag)")
-
-    catalog = catalog_all[catalog_all[mag_col].astype(float) > MAG_MIN].reset_index(drop=True)
-    if catalog.empty:
-        raise ValueError(f"No events with magnitude > {MAG_MIN}")
-
-    first_row = catalog.iloc[0]
-    event_id = str(first_row["evid"])
-    origin_time = UTCDateTime(str(first_row[ORIGIN_COL]))
-
-    traces = load_stack_traces(OUTPUT_ROOT)
-    plot_stacks(
-        origin_time,
-        traces,
-        f"Event {event_id} stacked components",
-        catalog,
-        catalog_all,
-        SHOW_ORIGINAL_PLOT,
+    keys_to_match = (
+        "min_freq",
+        "max_freq",
+        "start_time",
+        "end_time",
+        "align_phase",
+        "analysis_hz",
     )
+    first_path, first = snapshots[0]
+    for path, snapshot in snapshots[1:]:
+        differences = [
+            key for key in keys_to_match if snapshot.get(key) != first.get(key)
+        ]
+        if differences:
+            raise ValueError(
+                f"Run snapshots disagree between {first_path} and {path}: "
+                f"{differences}"
+            )
+    return first
+
+
+def _magnitude_column(catalog: pd.DataFrame) -> str | None:
+    for column in ("magnitude", "mag"):
+        if column in catalog.columns:
+            return column
+    return None
+
+
+def has_zero_skip(value) -> bool:
+    """Return True only when a catalog skip value is numerically zero."""
+    try:
+        return float(value) == 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def load_event_stacks(
+    run_dir: Path,
+    components: list[str],
+    catalog: pd.DataFrame,
+    parameters: dict,
+) -> dict[str, list[EventStack]]:
+    """Load the requested per-event stack files from one align_stack run."""
+    catalog_by_event = catalog.drop_duplicates("evid").set_index("evid")
+    magnitude_column = _magnitude_column(catalog)
+    configured_events = [str(event_id) for event_id in parameters.get("events", [])]
+    event_ids = configured_events or sorted(
+        path.name for path in run_dir.iterdir() if path.is_dir()
+    )
+    stacks_by_component = {component: [] for component in components}
+
+    for event_id in event_ids:
+        if event_id not in catalog_by_event.index:
+            print(f"[WARN] Event {event_id} is absent from the catalog; skipping it.")
+            continue
+        row = catalog_by_event.loc[event_id]
+        if not has_zero_skip(row.get("skip")):
+            continue
+        magnitude = None
+        if magnitude_column is not None:
+            try:
+                magnitude = float(row[magnitude_column])
+            except (TypeError, ValueError):
+                pass
+        if magnitude is not None and magnitude <= MAG_MIN:
+            continue
+
+        origin = UTCDateTime(str(row[ORIGIN_COL]))
+        for component in components:
+            file_component = COMPONENT_FILE_NAMES[component]
+            path = run_dir / event_id / f"{event_id}_{file_component}_stack.mseed"
+            if not path.exists():
+                print(f"[WARN] Missing requested {component} stack: {path}")
+                continue
+            stream = read(str(path))
+            if not stream:
+                print(f"[WARN] Empty requested {component} stack: {path}")
+                continue
+            stacks_by_component[component].append(
+                EventStack(event_id, origin, magnitude, stream[0])
+            )
+
+    missing_components = [
+        component
+        for component, event_stacks in stacks_by_component.items()
+        if not event_stacks
+    ]
+    if missing_components:
+        raise FileNotFoundError(
+            f"No stack files found for requested components {missing_components} "
+            f"under {run_dir}"
+        )
+    return stacks_by_component
+
+
+def shift_left_zeropad(values: np.ndarray, samples: int) -> np.ndarray:
+    shifted = np.zeros_like(values)
+    if samples == 0:
+        shifted[:] = values
+    elif samples > 0 and samples < values.size:
+        shifted[:-samples] = values[samples:]
+    elif samples < 0 and -samples < values.size:
+        shifted[-samples:] = values[:samples]
+    return shifted
+
+
+def correlation_lag(
+    reference: np.ndarray,
+    candidate: np.ndarray,
+    window_start: int,
+    window_end: int,
+    max_shift_samples: int,
+) -> int:
+    """Return the bounded lag that best aligns candidate with reference."""
+    best_lag = 0
+    best_correlation = -np.inf
+    for lag in range(-max_shift_samples, max_shift_samples + 1):
+        shifted = shift_left_zeropad(candidate, lag)
+        ref_window = reference[window_start:window_end]
+        candidate_window = shifted[window_start:window_end]
+        if not ref_window.size or ref_window.size != candidate_window.size:
+            continue
+        ref_centered = ref_window - np.mean(ref_window)
+        candidate_centered = candidate_window - np.mean(candidate_window)
+        denominator = np.linalg.norm(ref_centered) * np.linalg.norm(
+            candidate_centered
+        )
+        correlation = (
+            float(np.dot(ref_centered, candidate_centered) / denominator)
+            if denominator
+            else -np.inf
+        )
+        if correlation > best_correlation:
+            best_correlation = correlation
+            best_lag = lag
+    return best_lag
+
+
+def should_mask_other_event(
+    event_magnitude: float | None,
+    other_magnitude: float | None,
+    mask_policy: str,
+) -> bool:
+    """Return whether another event's arrival should be masked."""
+    if mask_policy not in MASK_POLICIES:
+        raise ValueError(f"Unknown event-mask policy: {mask_policy!r}")
+    if mask_policy == "none":
+        return False
+    if event_magnitude is None or other_magnitude is None:
+        return False
+    if mask_policy == "smaller":
+        return other_magnitude < event_magnitude
+    if mask_policy == "all":
+        return True
+    return other_magnitude >= event_magnitude - MAG_DIFF_MIN
+
+
+def process_component_stacks(
+    event_stacks: list[EventStack],
+    catalog: pd.DataFrame,
+    parameters: dict,
+    mask_policy: str = "comparable_or_larger",
+) -> list[ProcessedStack]:
+    """Cross-correlate, normalize, and mask the stacks for one component."""
+    sample_rates = {float(item.trace.stats.sampling_rate) for item in event_stacks}
+    if len(sample_rates) != 1:
+        raise ValueError(f"Stack sample rates differ: {sorted(sample_rates)}")
+    sample_rate = sample_rates.pop()
+    npts = min(int(item.trace.stats.npts) for item in event_stacks)
+    start_time = float(parameters.get("start_time", 0.0))
+    align_start = max(0, int(round((ALIGN_WINDOW_START - start_time) * sample_rate)))
+    align_end = min(npts, int(round((ALIGN_WINDOW_END - start_time) * sample_rate)))
+    if align_end <= align_start:
+        raise ValueError(
+            f"Alignment window {ALIGN_WINDOW_START}–{ALIGN_WINDOW_END} s is "
+            f"outside the stack time range."
+        )
+    max_shift_sec = float(parameters.get("event_stack_alignment_max_shift_sec", 0.2))
+    max_shift_samples = int(round(max_shift_sec * sample_rate))
+    requested_reference = str(parameters.get("event_alignment_reference", ""))
+    reference_item = next(
+        (
+            item
+            for item in event_stacks
+            if requested_reference and item.event_id == requested_reference
+        ),
+        event_stacks[0],
+    )
+    if requested_reference and reference_item.event_id != requested_reference:
+        print(
+            f"[WARN] Reference event {requested_reference} has no stack; "
+            f"using {reference_item.event_id}."
+        )
+    reference = np.asarray(reference_item.trace.data[:npts], dtype=float)
+    time_axis = start_time + np.arange(npts) / sample_rate
+
+    magnitude_column = _magnitude_column(catalog)
+    catalog_events = []
+    for _, row in catalog.iterrows():
+        try:
+            origin = UTCDateTime(str(row[ORIGIN_COL]))
+        except Exception:
+            continue
+        magnitude = None
+        if magnitude_column is not None:
+            try:
+                magnitude = float(row[magnitude_column])
+            except (TypeError, ValueError):
+                pass
+        catalog_events.append((origin, magnitude))
+
+    processed = []
+    for item in event_stacks:
+        values = np.asarray(item.trace.data[:npts], dtype=float)
+        lag = correlation_lag(
+            reference,
+            values,
+            align_start,
+            align_end,
+            max_shift_samples,
+        )
+        values = shift_left_zeropad(values, lag)
+        maximum = float(np.max(np.abs(values))) if values.size else 0.0
+        if maximum:
+            values = values / maximum
+        pre_mask = values.copy()
+        post_mask = values.copy()
+
+        for other_origin, other_magnitude in catalog_events:
+            offset = float(other_origin - item.origin)
+            if abs(offset) < 1e-6:
+                continue
+            if not should_mask_other_event(
+                item.magnitude,
+                other_magnitude,
+                mask_policy,
+            ):
+                continue
+            mask_start = offset + ALIGN_WINDOW_START
+            mask_end = offset + ALIGN_WINDOW_END
+            mask = (time_axis >= mask_start) & (time_axis <= mask_end)
+            post_mask[mask] = REPLACE_LEVEL
+
+        processed.append(
+            ProcessedStack(
+                item.event_id,
+                item.origin,
+                time_axis.copy(),
+                pre_mask,
+                post_mask,
+            )
+        )
+    return processed
+
+
+def _plot_component_rows(
+    processed_by_component: dict[str, list[ProcessedStack]],
+    components: list[str],
+    data_field: str,
+    offset: bool,
+    title: str,
+    output_path: Path | None,
+    amplitude_limits: tuple[float, float] | None = None,
+    show_plot: bool = False,
+) -> None:
+    fig, axes = plt.subplots(
+        len(components),
+        1,
+        figsize=(10, 3.0 * len(components)),
+        sharex=True,
+        squeeze=False,
+    )
+    for component, ax in zip(components, axes[:, 0]):
+        records = processed_by_component[component]
+        ordered = sorted(records, key=lambda item: item.origin)
+        if offset:
+            ordered = list(reversed(ordered))
+        for index, record in enumerate(ordered):
+            values = np.asarray(getattr(record, data_field), dtype=float)
+            vertical_offset = index * OFFSET_STEP if offset else 0.0
+            ax.plot(record.time, values + vertical_offset, lw=0.9, alpha=0.7)
+            if offset:
+                ax.text(
+                    record.time[0],
+                    vertical_offset,
+                    record.event_id,
+                    fontsize=6,
+                    va="bottom",
+                )
+        if not offset:
+            matrix = np.vstack(
+                [np.asarray(getattr(record, data_field), dtype=float) for record in records]
+            )
+            ax.plot(records[0].time, np.nanmedian(matrix, axis=0), color="k", lw=2.2)
+            ax.axhline(0.0, color="k", lw=0.6, alpha=0.5)
+            if amplitude_limits is not None:
+                ax.set_ylim(*amplitude_limits)
+        ax.set_ylabel(COMPONENT_LABELS[component])
+        ax.grid(alpha=0.2)
+    axes[-1, 0].set_xlabel("Time since event origin (s)")
+    fig.suptitle(title, fontsize=12, fontweight="bold")
+    fig.tight_layout()
+    if output_path is not None:
+        fig.savefig(output_path, dpi=300, bbox_inches="tight")
+        print(f"✓ Wrote plot: {output_path}")
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def _plot_component_medians(
+    processed_by_component: dict[str, list[ProcessedStack]],
+    components: list[str],
+    title: str,
+    output_path: Path | None,
+    amplitude_limits: tuple[float, float] | None = None,
+    show_plot: bool = False,
+) -> None:
+    fig, axes = plt.subplots(
+        len(components),
+        1,
+        figsize=(10, 3.0 * len(components)),
+        sharex=True,
+        squeeze=False,
+    )
+    for component, ax in zip(components, axes[:, 0]):
+        records = processed_by_component[component]
+        matrix = np.vstack([record.post_mask for record in records])
+        ax.plot(records[0].time, np.nanmedian(matrix, axis=0), color="k", lw=1.5)
+        ax.axhline(0.0, color="k", lw=0.6, alpha=0.5)
+        if amplitude_limits is not None:
+            ax.set_ylim(*amplitude_limits)
+        ax.set_ylabel(COMPONENT_LABELS[component])
+        ax.grid(alpha=0.2)
+    axes[-1, 0].set_xlabel("Time since event origin (s)")
+    fig.suptitle(title, fontsize=12, fontweight="bold")
+    fig.tight_layout()
+    if output_path is not None:
+        fig.savefig(output_path, dpi=300, bbox_inches="tight")
+        print(f"✓ Wrote plot: {output_path}")
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def write_plots(
+    processed_by_component: dict[str, list[ProcessedStack]],
+    components: list[str],
+    run_dir: Path,
+    parameters: dict,
+    mask_policy: str = "comparable_or_larger",
+    overlay_only: bool = False,
+    save_plots: bool = True,
+    show_plots: bool = False,
+    amplitude_limits: tuple[float, float] | None = DEFAULT_AMPLITUDE_LIMITS,
+) -> Path:
+    output_dir = run_dir / "stacker"
+    if save_plots:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    band = f"{parameters.get('min_freq', '?')}–{parameters.get('max_freq', '?')} Hz"
+    common_title = f"{run_dir.name}: {band}; components {' '.join(components)}"
+    if mask_policy == "comparable_or_larger":
+        filename_suffix = ""
+        mask_title = "comparable/larger-event arrivals masked"
+    else:
+        filename_suffix = f"_{mask_policy}_events_masked"
+        mask_title = f"{mask_policy}-event arrivals masked"
+
+    _plot_component_rows(
+        processed_by_component,
+        components,
+        "post_mask",
+        False,
+        f"Aligned event stacks and median; {mask_title}\n{common_title}",
+        (
+            output_dir / f"stack_segments_overlay{filename_suffix}.png"
+            if save_plots
+            else None
+        ),
+        amplitude_limits=amplitude_limits,
+        show_plot=show_plots,
+    )
+    if SHOW_MEDIAN_TRACE and not overlay_only:
+        _plot_component_medians(
+            processed_by_component,
+            components,
+            f"Aligned event-stack medians\n{common_title}",
+            output_dir / "stack_segments_median.png" if save_plots else None,
+            amplitude_limits=amplitude_limits,
+            show_plot=show_plots,
+        )
+    if SHOW_OFFSET_TRACES and not overlay_only:
+        _plot_component_rows(
+            processed_by_component,
+            components,
+            "pre_mask",
+            True,
+            f"Aligned event stacks before masking\n{common_title}",
+            output_dir / "stack_segments_offset_pre_mask.png" if save_plots else None,
+            show_plot=show_plots,
+        )
+        _plot_component_rows(
+            processed_by_component,
+            components,
+            "post_mask",
+            True,
+            f"Aligned event stacks after masking\n{common_title}",
+            output_dir / "stack_segments_offset_post_mask.png" if save_plots else None,
+            show_plot=show_plots,
+        )
+    return output_dir
+
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Compare per-event component stacks from one align_stack run."
+    )
+    parser.add_argument(
+        "--run",
+        default=DEFAULT_RUN,
+        help=(
+            "Run suffix after the implicit 2026 prefix, for example "
+            f"0722_182322_4666 (default: {DEFAULT_RUN})."
+        ),
+    )
+    parser.add_argument(
+        "--components",
+        nargs="+",
+        default=DEFAULT_COMPONENTS,
+        metavar="COMPONENT",
+        help=(
+            "Components to process, chosen from Z R T "
+            f"(default: {' '.join(DEFAULT_COMPONENTS)})."
+        ),
+    )
+    parser.add_argument(
+        "--mask-other-events",
+        choices=MASK_POLICIES,
+        default=DEFAULT_MASK_OTHER_EVENTS,
+        help=(
+            "Which other-event arrivals to mask within each event stack "
+            f"(default: {DEFAULT_MASK_OTHER_EVENTS})."
+        ),
+    )
+    parser.add_argument(
+        "--amplitude-limits",
+        nargs=2,
+        type=float,
+        metavar=("MIN", "MAX"),
+        default=DEFAULT_AMPLITUDE_LIMITS,
+        help=(
+            "Y-axis limits for non-offset plots, clipping the visible "
+            "amplitude range (default: -0.1 0.1)."
+        ),
+    )
+    overlay_group = parser.add_mutually_exclusive_group()
+    overlay_group.add_argument(
+        "--overlay-only",
+        dest="overlay_only",
+        action="store_true",
+        help="Create only the aligned overlay-and-median plot.",
+    )
+    overlay_group.add_argument(
+        "--all-plots",
+        dest="overlay_only",
+        action="store_false",
+        help="Create the overlay, median, and offset plots.",
+    )
+    show_group = parser.add_mutually_exclusive_group()
+    show_group.add_argument(
+        "--show",
+        dest="show",
+        action="store_true",
+        help="Show plots in interactive Matplotlib windows.",
+    )
+    show_group.add_argument(
+        "--no-show",
+        dest="show",
+        action="store_false",
+        help="Do not show interactive Matplotlib windows.",
+    )
+    save_group = parser.add_mutually_exclusive_group()
+    save_group.add_argument(
+        "--save",
+        dest="save",
+        action="store_true",
+        help="Write PNG plot files.",
+    )
+    save_group.add_argument(
+        "--no-save",
+        dest="save",
+        action="store_false",
+        help="Do not write PNG plot files.",
+    )
+    parser.set_defaults(
+        overlay_only=DEFAULT_OVERLAY_ONLY,
+        show=DEFAULT_SHOW_PLOTS,
+        save=DEFAULT_SAVE_PLOTS,
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_argument_parser().parse_args(argv)
+    amplitude_limits = tuple(args.amplitude_limits)
+    if amplitude_limits[0] >= amplitude_limits[1]:
+        raise ValueError("--amplitude-limits requires MIN to be less than MAX")
+    run_dir = resolve_run_directory(args.run)
+    components = normalize_components(args.components)
+    if not run_dir.is_dir():
+        raise FileNotFoundError(f"align_stack run directory not found: {run_dir}")
+
+    print(f"Using align_stack run: {run_dir}")
+    print(f"Processing components: {' '.join(components)}")
+    parameters = load_run_parameters(run_dir)
+    catalog = load_catalog(CATALOG_FILE)
+    stacks_by_component = load_event_stacks(
+        run_dir,
+        components,
+        catalog,
+        parameters,
+    )
+    processed_by_component = {
+        component: process_component_stacks(
+            stacks_by_component[component],
+            catalog,
+            parameters,
+            mask_policy=args.mask_other_events,
+        )
+        for component in components
+    }
+    output_dir = write_plots(
+        processed_by_component,
+        components,
+        run_dir,
+        parameters,
+        mask_policy=args.mask_other_events,
+        overlay_only=args.overlay_only,
+        save_plots=args.save,
+        show_plots=args.show,
+        amplitude_limits=amplitude_limits,
+    )
+    if args.save:
+        print(f"Stacker outputs: {output_dir}")
 
 
 if __name__ == "__main__":

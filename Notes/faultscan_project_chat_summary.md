@@ -19,9 +19,9 @@ project conversation threads.
 - `use_json_event_location` controls only whether `event_lat`, `event_lon`, and `event_depth` in `rp_input.json` override catalog event locations.
 - The catalog column `time shift` is applied to every event origin independently of `use_json_event_location`.
 - The same catalog event shift is applied for Z, R, and T processing.
-- `use_event_stack_xcorr_alignment` separately controls the optional final cross-event stack correlation step.
-  - `true`: adds an event-stack correlation residual in the all-event aligned-stack plot.
-  - `false`: uses the catalog event origin shifts without an additional cross-event waveform shift.
+- `use_event_static_correction` follows the same convention as the station-static flag.
+  - `true`: applies the catalog event origin shifts and does not measure an additional cross-event waveform residual.
+  - `false`: leaves catalog event statics unapplied and measures cross-event stack residuals from the waveforms.
 
 ## Station Processing and Statics
 
@@ -29,7 +29,11 @@ project conversation threads.
 - The normal pipeline computes fresh station residual shifts relative to theoretical TauP timing and writes per-event/component static workbooks to `output/Statics`.
 - `plot_statics_by_station.py` calculates robust event baselines and robust per-station median statics using MAD outlier rejection.
 - `stations.xlsx` can hold station static columns. The current shared-column convention is `station static s`.
-- `use_station_static_correction` is a JSON option that applies the `station static s` values from `stations.xlsx` in place of residual-lag searches:
+- `station_static_mode` explicitly selects `none`, `tabulated`, or
+  `cross_correlation` station alignment. `none` uses relative TauP travel
+  times alone; `tabulated` applies the `station static s` values from
+  `stations.xlsx`; and `cross_correlation` estimates waveform residuals.
+  In `tabulated` mode:
   - Station statics are converted to be relative to the selected reference station.
   - The correction is used in all three alignment stages.
   - Station correlation is still evaluated for screening, but no new residual lag is searched.
@@ -157,14 +161,14 @@ The shared waveform reader excludes these stations before reading, rotation, ali
 
 ### Cross-Event Stack Alignment and Catalog Shift Work
 
-- Subsequent unstaged development added `compute_event_stack_alignment_shifts` and `plot_all_events_component_offsets_aligned`. Event stacks are compared with reference event `CI_40353472`; the optional waveform residual search is limited by `event_stack_alignment_max_shift_sec`, while `use_event_stack_xcorr_alignment` controls whether that residual is actually measured and applied.
+- Subsequent unstaged development added `compute_event_stack_alignment_shifts` and `plot_all_events_component_offsets_aligned`. Event stacks are compared with reference event `CI_40353472`; the optional waveform residual search is limited by `event_stack_alignment_max_shift_sec`. The control was initially named `use_event_stack_xcorr_alignment` and was later replaced by the inverse-convention `use_event_static_correction` flag.
 - The aligned-stack products include a vertically offset PNG and an Excel workbook named `all_events_<component>_stack_xcorr_alignment_to_CI_40353472.xlsx`. The workbook records predicted and residual lags, waveform correlation, left/right alignment shifts, whether a residual was measured, the reference-event flag, and the catalog time shift used for plotting.
 - Repeated R and T products currently exist in later run directories, including `20260720_163908_1030`, `20260720_181451_5781`, `20260720_181740_9915`, `20260721_181654_3637`, and `20260721_185210_2337`. Each contains the relevant component alignment workbook and the corresponding `all_events_<component>_offset_stacks_S_xcorr_aligned_to_CI_40353472.png`; the latest observed T pair is in `20260721_185210_2337`.
 - `tools/update_catalog_time_shifts.mjs` was generalized to accept a component and run-output directory. R results update the shared catalog column `time shift`; T results are preserved separately in `time shift T`. `catalog_local_hand.xlsx` currently contains both columns, and the T column has populated event shifts (for example, `CI_40353272 = -0.052 s` and reference event `CI_40353472 = 0.000 s`). The alignment pipeline still intentionally applies the shared `time shift` column to Z, R, and T; `time shift T` is retained as a comparison/result column rather than automatically replacing the shared correction.
 
 ### Configuration and Outputs Added During This Work
 
-- JSON configuration gained explicit controls for `event_alignment_reference`, `event_stack_alignment_max_shift_sec`, `use_json_event_location`, `use_event_stack_xcorr_alignment`, and `use_station_static_correction`. Event-location override validation requires all three coordinates/depth values when enabled and otherwise retains catalog metadata.
+- JSON configuration gained explicit controls for `event_alignment_reference`, `event_stack_alignment_max_shift_sec`, `use_json_event_location`, `use_event_static_correction`, and the three-way `station_static_mode`. Legacy `use_station_static_correction` configurations remain accepted. Event-location override validation requires all three coordinates/depth values when enabled and otherwise retains catalog metadata.
 - Per-event station-shift export was restored and generalized. Workbooks now identify the waveform component/phase and the catalog-shift basis (`R` or `T`) and use filenames ending in `shiftR_xcorr_statics.xlsx` or `shiftT_xcorr_statics.xlsx`.
 - `plot_statics_by_station.py` gained event-baseline differences relative to a configurable reference event and writes an event-alignment workbook in addition to raw, corrected, station-median, and baseline products.
 
@@ -231,3 +235,23 @@ The shared waveform reader excludes these stations before reading, rotation, ali
   - `statics_results_assets/t_s_statics_by_station.png`
 - No Python, shell, Markdown, or JSON generator reference for `statics_results_explanation.html` was found in the repository. The report appears to be a hand-authored or AI-authored snapshot based on `plot_statics_by_station.py` outputs rather than a reproducible product generated by a tracked script.
 - It remains unresolved whether the HTML came from the ChatGPT app, VS Code chat, Codex, or manual editing. Git records when it entered the repository but not which app or prompt created it. VS Code Timeline or chat history around 2026-06-09 may be the best remaining place to look.
+
+## 2026-07-22 Change Review: Alignment Tools Integration
+
+### Review Scope and Verification
+
+- The reviewed change is commit `fdf9001` (`Add alignment tools and project status notes`) relative to `e674e9d`. It adds the cross-event alignment products, station-static tooling, plotting utilities, catalog-update script, configuration changes, tests, and project notes summarized above.
+- All changed Python files compile in the `vidale_main` Conda environment.
+- The focused command `python -m unittest tests.test_align_stack_smoke` passes all 23 tests.
+- Full discovery with `python -m unittest discover -s tests` runs 34 tests but fails four pipeline smoke tests. In each failure, mocked event context returns `save_dir` as a string and `write_run_parameter_snapshot` calls `.mkdir()` on it. The snapshot helper should normalize its argument with `Path(output_dir)`, or the repository-wide path contract and tests should be changed consistently. The full suite is therefore not currently green.
+
+### Review Findings Requiring Follow-Up
+
+- At the reviewed commit, `tools/update_catalog_time_shifts.mjs` overwrote catalog values with `shift_left_to_align_waveform_seconds` without checking `xcorr_residual_measured`. That finding was subsequently addressed by the validated Python updater, which rejects non-measured workbooks and combines each residual with the catalog baseline recorded by the run.
+- Catalog updating is not safely repeatable. Event origins are processed using the catalog's existing `time shift`, while the alignment workbook reports the remaining alignment measured from that processed run. Treating the reported value as a new absolute catalog value can discard the prior correction on a subsequent iteration. The update rule needs explicit baseline provenance and should normally combine a measured residual with the shift used by that run, rather than blindly replacing it.
+- Static-workbook provenance is inconsistent with the processing path. `catalog_time_shift_column()` always selects the shared `time shift` column, but `write_component_phase_time_shifts()` labels and names outputs as `shiftR` or `shiftT` from the configured `component`. With `all_channels: true` and `component: T`, Z/R/T workbooks are consequently labeled as T-basis even though all components used the shared shift column. Downstream R-versus-T filtering and station-workbook augmentation can therefore compare labels rather than genuinely different correction bases. The provenance field should record the actual catalog column used, or the obsolete basis distinction should be removed.
+- The catalog updater imports `@oai/artifact-tool` from a versioned absolute cache path under one user's home directory. This makes the committed tool dependent on a transient local runtime layout; a stable declared dependency or a Python workbook implementation would make the workflow reproducible.
+
+### Working-Tree Note
+
+- The only uncommitted file observed during this review was `.DS_Store`; it was not modified or included in the notes update.

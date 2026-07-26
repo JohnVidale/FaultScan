@@ -694,6 +694,7 @@ def compute_stage1_aligned_stack(
     move_limit_samples: int,
     calc_shifts: dict,
     imposed_station_shifts: dict[str, float] | None,
+    measure_station_residuals: bool,
     timing_state: TimingState,
 ) -> np.ndarray:
     """Stage 1: align traces to reference and return normalized stack."""
@@ -712,17 +713,22 @@ def compute_stage1_aligned_stack(
                 lag1 = expected_shift_samples + int(
                     round(imposed_station_shifts[station_id] * sample_rate)
                 )
-            else:
+            elif measure_station_residuals:
                 rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
                 lag1 = expected_shift_samples + compute_lag(
                     ref, rolled_expected, win_start, win_end, move_limit_samples
                 )
+            else:
+                lag1 = expected_shift_samples
         else:
-            lag1 = (
-                int(round(imposed_station_shifts[station_id] * sample_rate))
-                if imposed_station_shifts is not None
-                else lag0 + compute_lag(ref, rolled, win_start, win_end, move_limit_samples)
-            )
+            if imposed_station_shifts is not None:
+                lag1 = int(round(imposed_station_shifts[station_id] * sample_rate))
+            elif measure_station_residuals:
+                lag1 = lag0 + compute_lag(
+                    ref, rolled, win_start, win_end, move_limit_samples
+                )
+            else:
+                lag1 = lag0
 
         aligned_stack += shift_left_zeropad(d, lag1)
     add_stage_timing(timing_state, "align_stage1", _stage1_wall_start, _stage1_cpu_start)
@@ -744,6 +750,7 @@ def compute_stage2_screened_stack(
     move_limit_samples: int,
     calc_shifts: dict,
     imposed_station_shifts: dict[str, float] | None,
+    measure_station_residuals: bool,
     r_window_min: float,
     timing_state: TimingState,
 ):
@@ -771,7 +778,7 @@ def compute_stage2_screened_stack(
                 lag2 = expected_shift_samples + int(
                     round(imposed_station_shifts[station_id] * sample_rate)
                 )
-            else:
+            elif measure_station_residuals:
                 rolled_expected = shift_left_zeropad(rolled, expected_shift_samples)
                 lag2 = expected_shift_samples + compute_lag(
                     aligned_stack,
@@ -780,14 +787,17 @@ def compute_stage2_screened_stack(
                     win_end,
                     move_limit_samples,
                 )
+            else:
+                lag2 = expected_shift_samples
         else:
-            lag2 = (
-                int(round(imposed_station_shifts[station_id] * sample_rate))
-                if imposed_station_shifts is not None
-                else lag0 + compute_lag(
+            if imposed_station_shifts is not None:
+                lag2 = int(round(imposed_station_shifts[station_id] * sample_rate))
+            elif measure_station_residuals:
+                lag2 = lag0 + compute_lag(
                     aligned_stack, rolled, win_start, win_end, move_limit_samples
                 )
-            )
+            else:
+                lag2 = lag0
 
         aligned_data = shift_left_zeropad(d, lag2)
         aligned_window = aligned_data[win_start:win_end]
@@ -837,6 +847,7 @@ def compute_stage3_finalized_rows(
     selected_ids: set,
     calc_shifts: dict,
     imposed_station_shifts: dict[str, float] | None,
+    measure_station_residuals: bool,
     npts: int,
     sample_rate: float,
     win_start: int,
@@ -851,7 +862,6 @@ def compute_stage3_finalized_rows(
     selected_rows = []  # (dist_km, station_id, y_aligned_norm, x_original_norm)
     rejected_rows = []
     aligned_bank = []
-    aligned_bank_all = []
     station_shifts = {}
     aligned_traces_by_station = {}
 
@@ -871,18 +881,23 @@ def compute_stage3_finalized_rows(
                     lag3 = expected_shift_samples + int(
                         round(imposed_station_shifts[station_id] * sample_rate)
                     )
-                else:
+                elif measure_station_residuals:
                     x_expected = shift_left_zeropad(x, expected_shift_samples)
                     lag_delta = compute_lag(
                         ref, x_expected, win_start, win_end, move_limit_samples
                     )
                     lag3 = expected_shift_samples + lag_delta
+                else:
+                    lag3 = expected_shift_samples
             else:
-                lag3 = (
-                    int(round(imposed_station_shifts[station_id] * sample_rate))
-                    if imposed_station_shifts is not None
-                    else compute_lag(ref, x, win_start, win_end, move_limit_samples)
-                )
+                if imposed_station_shifts is not None:
+                    lag3 = int(round(imposed_station_shifts[station_id] * sample_rate))
+                elif measure_station_residuals:
+                    lag3 = compute_lag(
+                        ref, x, win_start, win_end, move_limit_samples
+                    )
+                else:
+                    lag3 = 0
             y = shift_left_zeropad(x, lag3)
 
         station_shifts[station_id] = {
@@ -899,7 +914,6 @@ def compute_stage3_finalized_rows(
             x_original = x.copy()
 
         aligned_traces_by_station[station_id] = y.copy()
-        aligned_bank_all.append(y)
 
         slat, slon = name2ll[station_id]
         dist_m, _, _ = gps2dist_azimuth(eve_lat, eve_lon, slat, slon)
@@ -923,7 +937,6 @@ def compute_stage3_finalized_rows(
         "selected_rows": selected_rows,
         "rejected_rows": rejected_rows,
         "aligned_bank": aligned_bank,
-        "aligned_bank_all": aligned_bank_all,
         "station_shifts": station_shifts,
         "aligned_traces_by_station": aligned_traces_by_station,
     }
@@ -934,16 +947,16 @@ def compute_time_axis_and_stack(
     end_time: float,
     npts: int,
     sample_rate: float,
-    aligned_bank_all: list,
+    aligned_bank: list,
     win_start: int,
     win_end: int,
 ):
-    """Build time axis/mask and normalized final stack from aligned traces."""
+    """Build the final stack from correlation-selected aligned traces."""
     t_abs = start_time + (np.arange(npts) / sample_rate)
     mask = (t_abs >= start_time) & (t_abs <= end_time)
 
-    if len(aligned_bank_all) > 0:
-        stack_vec = np.mean(np.vstack(aligned_bank_all), axis=0)
+    if len(aligned_bank) > 0:
+        stack_vec = np.mean(np.vstack(aligned_bank), axis=0)
         win = stack_vec[win_start:win_end]
         ms = np.max(np.abs(win)) if win.size > 0 else 1.0
         if ms > 0:

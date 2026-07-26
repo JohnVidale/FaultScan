@@ -1,9 +1,9 @@
 {
-  "min_freq":       3.0,
+  "min_freq":       1.0,
   "max_freq":      10.0,
 
-  "start_time":     4.75,
-  "end_time":       5.75,
+  "start_time":     -2,
+  "end_time":       12,
 
   "win_pre":        0.05,
   "win_post":       0.15,
@@ -20,8 +20,8 @@
 
   "event_alignment_reference": "CI_40353472",
   "event_stack_alignment_max_shift_sec": 0.2,
-  "use_event_stack_xcorr_alignment": false,
-  "use_station_static_correction": false,
+  "use_event_static_correction": true,
+  "station_static_mode": "tabulated",
   "station_static_file": "/Users/jvidale/Documents/Research/FaultScanR/event_sta_info/stations.xlsx",
   "station_static_column": "station static s",
   "use_json_event_location": true,
@@ -68,6 +68,6 @@
   ],
 
   "show_individual_seismograms": false,
-  "overlay_original_on_individual": true,
+  "overlay_original_on_individual": false,
   "show_record_section_plot": false
 }

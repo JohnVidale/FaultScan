@@ -1,4 +1,5 @@
 import importlib
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -8,6 +9,13 @@ import numpy as np
 class AlignStackPipelineSmokeTests(unittest.TestCase):
     def setUp(self):
         self.mod = importlib.import_module("align_stack")
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        path_prefix_patch = patch.object(
+            self.mod, "path_prefix", f"{self.temp_dir.name}/"
+        )
+        path_prefix_patch.start()
+        self.addCleanup(path_prefix_patch.stop)
 
     def test_run_pipeline_single_component_branch(self):
         event_context = (
@@ -15,7 +23,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             35.0,
             -117.0,
             None,
-            "/tmp",
+            self.temp_dir.name,
             {"1": (35.0, -117.0)},
             object(),
             {},
@@ -50,7 +58,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             np.array([0.1]),
             [("1", 0.9, np.array([0.1]))],
             [],
-            {"1": 0.0},
+            {"1": {"lag_samples": 0, "lag_seconds": 0.0}},
             {"1": np.array([0.1])},
             np.array([0.0]),
             np.array([True]),
@@ -114,14 +122,14 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
         self.assertEqual(mock_record.call_args.kwargs["eve_id"], "E1")
         self.assertEqual(mock_record.call_args.kwargs["plot_comp"], "Z")
         self.assertEqual(mock_record.call_args.kwargs["align_phase_name"], self.mod.align_phase)
-        self.assertEqual(mock_record.call_args.kwargs["save_dir"], "/tmp")
+        self.assertEqual(mock_record.call_args.kwargs["save_dir"], self.temp_dir.name)
         mock_single.assert_called_once()
         self.assertEqual(mock_single.call_args.kwargs["record_fig"], "FIG")
         self.assertEqual(mock_single.call_args.kwargs["eve_id"], "E1")
         self.assertEqual(mock_single.call_args.kwargs["plot_comp"], "Z")
         self.assertEqual(mock_single.call_args.kwargs["align_phase_name"], self.mod.align_phase)
         self.assertEqual(mock_single.call_args.kwargs["num_traces"], 1)
-        self.assertEqual(mock_single.call_args.kwargs["save_dir"], "/tmp")
+        self.assertEqual(mock_single.call_args.kwargs["save_dir"], self.temp_dir.name)
         mock_finalize.assert_called_once()
         mock_store.assert_not_called()
         mock_setup.assert_not_called()
@@ -190,7 +198,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             35.0,
             -117.0,
             None,
-            "/tmp",
+            self.temp_dir.name,
             {"1": (35.0, -117.0)},
             object(),
             {},
@@ -225,7 +233,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             35.0,
             -117.0,
             None,
-            "/tmp",
+            self.temp_dir.name,
             {"1": (35.0, -117.0)},
             object(),
             {},
@@ -260,7 +268,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             np.array([0.1]),
             [("1", 0.9, np.array([0.1]))],
             [],
-            {"1": 0.0},
+            {"1": {"lag_samples": 0, "lag_seconds": 0.0}},
             {"1": np.array([0.1])},
             np.array([0.0]),
             np.array([True]),
@@ -333,7 +341,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
         ), patch.object(
             self.mod,
             "persist_three_component_outputs",
-            return_value="/tmp",
+            return_value=self.temp_dir.name,
         ) as mock_persist, patch.object(
             self.mod,
             "plot_three_component_summary_products",
@@ -354,7 +362,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
         for rec_call in mock_record.call_args_list:
             self.assertEqual(rec_call.kwargs["eve_id"], "E1")
             self.assertEqual(rec_call.kwargs["align_phase_name"], self.mod.align_phase)
-            self.assertEqual(rec_call.kwargs["save_dir"], "/tmp")
+            self.assertEqual(rec_call.kwargs["save_dir"], self.temp_dir.name)
         mock_plot_stage.assert_not_called()
         mock_setup.assert_called_once()
         mock_persist.assert_called_once()
@@ -365,7 +373,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
         mock_summary.assert_called_once()
         self.assertEqual(mock_summary.call_args.kwargs["eve_id"], "E1")
         self.assertEqual(mock_summary.call_args.kwargs["align_phase_name"], self.mod.align_phase)
-        self.assertEqual(mock_summary.call_args.kwargs["save_dir"], "/tmp")
+        self.assertEqual(mock_summary.call_args.kwargs["save_dir"], self.temp_dir.name)
         self.assertEqual(mock_summary.call_args.kwargs["comp_order"], ["DPZ", "R", "T"])
 
     def test_run_pipeline_three_component_skips_combined_when_incomplete(self):
@@ -374,7 +382,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             35.0,
             -117.0,
             None,
-            "/tmp",
+            self.temp_dir.name,
             {"1": (35.0, -117.0)},
             object(),
             {},
@@ -409,7 +417,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             np.array([0.1]),
             [("1", 0.9, np.array([0.1]))],
             [],
-            {"1": 0.0},
+            {"1": {"lag_samples": 0, "lag_seconds": 0.0}},
             {"1": np.array([0.1])},
             np.array([0.0]),
             np.array([True]),
@@ -485,7 +493,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
         ), patch.object(
             self.mod,
             "persist_three_component_outputs",
-            return_value="/tmp",
+            return_value=self.temp_dir.name,
         ) as mock_persist, patch.object(
             self.mod,
             "plot_three_component_summary_products",
