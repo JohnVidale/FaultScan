@@ -17,16 +17,20 @@ project conversation threads.
 ## Event Location and Time Shifts
 
 - `use_json_event_location` controls only whether `event_lat`, `event_lon`, and `event_depth` in `rp_input.json` override catalog event locations.
-- The catalog column `time shift` is applied to every event origin independently of `use_json_event_location`.
-- The same catalog event shift is applied for Z, R, and T processing.
-- `use_event_static_correction` follows the same convention as the station-static flag.
+- When `use_event_static_correction` is enabled, the catalog column
+  `time shift` is applied independently of `use_json_event_location`.
+- The same enabled catalog event shift is applied for Z, R, and T processing.
+- `use_event_static_correction` controls event corrections independently of
+  the three-way station-static mode.
   - `true`: applies the catalog event origin shifts and does not measure an additional cross-event waveform residual.
   - `false`: leaves catalog event statics unapplied and measures cross-event stack residuals from the waveforms.
 
 ## Station Processing and Statics
 
 - DP1/DP2 horizontals are rotated to R/T using station geometry and the existing `-11 degree` orientation correction.
-- The normal pipeline computes fresh station residual shifts relative to theoretical TauP timing and writes per-event/component static workbooks to `output/Statics`.
+- In `cross_correlation` station-static mode, the pipeline computes fresh
+  station residual shifts relative to theoretical TauP timing and writes
+  per-event/component static workbooks to `output/Statics`.
 - `plot_statics_by_station.py` calculates robust event baselines and robust per-station median statics using MAD outlier rejection.
 - `stations.xlsx` can hold station static columns. The current shared-column convention is `station static s`.
 - `station_static_mode` explicitly selects `none`, `tabulated`, or
@@ -255,3 +259,306 @@ The shared waveform reader excludes these stations before reading, rotation, ali
 ### Working-Tree Note
 
 - The only uncommitted file observed during this review was `.DS_Store`; it was not modified or included in the notes update.
+
+## 2026-07-26 Chat Addendum: Cross-Task Summary Consolidation
+
+### Scope and Outcome
+
+- The user revisited most FaultScan project chats and issued the summary-merge request in each. Their contributions are now consolidated into this project note rather than being left only in separate chat histories.
+- This addendum records a project-memory update only. It made no code changes, configuration changes, analysis outputs, plots, or scientific interpretations.
+
+### Limitation
+
+- A chat can contribute only information it explicitly writes into this Markdown file. The file is therefore the durable consolidated record, but it cannot guarantee inclusion of details from a project chat that was not asked to update it or did not complete its update.
+
+## 2026-07-26 Chat Addendum: Archiving and Per-Chat Memory Capture
+
+### Scope and Decisions
+
+- This was a project-memory workflow discussion. Apart from this notes update, it made no code changes, configuration changes, output files, or plots.
+- Archiving a chat preserves it in the account so it can be searched, reopened, continued, or unarchived, but removes it from normal sidebar view and from automatic chat-history reference in other chats. Any separately saved memory remains, and information already copied into project files remains available independently of the archived conversation.
+- Archived chats can be found through the same search opened by the sidebar magnifying glass or `Command-K` on macOS. They can also be managed and unarchived through the application's Archived Chats settings.
+- For FaultScan, project-relevant details should be transferred to `Notes/faultscan_project_chat_summary.md` before or after archiving. This makes the durable record independent of whether the originating chat remains active.
+
+### Agreed Capture Procedure
+
+- There is no built-in Codex command that should be relied upon to sweep and accurately reconstruct every other project chat. Instead, open each relevant active or archived chat and ask that chat to contribute its own information to the cumulative summary.
+- The reusable prompt is:
+
+  > Review this entire chat and update Notes/faultscan_project_chat_summary.md with any decisions, code changes, configuration changes, output files, plots, scientific interpretations, and unresolved items that are not already recorded. Keep existing accurate content, avoid duplication, and add a dated entry describing what this chat contributed. If the chat contains no project-relevant information, do not modify the file.
+
+- This prompt should be run once near the end of each relevant conversation. Existing archived chats can be located with `Command-K`, opened, and processed the same way without permanently unarchiving them.
+- No custom slash command, skill, hook, or automation was created for this workflow. Automating the per-chat capture remains an optional future improvement, but any implementation must avoid assuming that one chat has complete access to the full contents of all others.
+
+## 2026-07-26 Chat Addendum: Daily Research Log Initiation
+
+### Scope and Files
+
+- This chat put the previously proposed daily-notebook structure into practice
+  by creating `Notes/daily/2026-07-22.md`. The file was initially untracked but
+  was later added to Git in commit `4348661`.
+- The adopted naming convention is `Notes/daily/YYYY-MM-DD.md`. The initial
+  template separates work completed, results and observations, scientific
+  interpretation, decisions and reasoning, problems or uncertainties, and
+  next steps.
+- The daily log is intended to remain selective: automatic processing reports
+  hold detailed objective records, while the daily note preserves important
+  observations, conclusions, questions, and reasons for decisions.
+- Apart from the Markdown daily log and this summary update, this chat made no
+  code changes, configuration changes, research output files, or plots.
+
+### July 22 Review Captured in the Log
+
+- The first daily log consolidated the alignment-tool integration,
+  documentation work, event/static correction decisions, outputs reviewed,
+  scientific interpretations, and unresolved questions already described in
+  the preceding addenda.
+- At the configuration checkpoint recorded by that log, processing used 250 Hz
+  snippets, all three components, S alignment, a 3--10 Hz band, a 0--12 s
+  interval, JSON event-location override, catalog event-static correction,
+  imposed station statics from `station static s`, and enabled individual and
+  record-section plotting. This is a historical snapshot; subsequent work
+  replaced the Boolean station-static setting with `station_static_mode` and
+  changed the active plotting and time-window values.
+- Full test discovery in the `vidale_main` environment passed all 40 tests at
+  that checkpoint. The tests wrote only to temporary directories and did not
+  create a new research processing run. This superseded the earlier review
+  checkpoint at which 34 tests ran with four pipeline-smoke failures.
+
+### Remaining Notebook Decision
+
+- Daily logging is now an established part of the repository workflow.
+  It remains optional to promote recurring subjects into durable topic notes
+  such as `station_quality.md` or `paper_ideas.md` when a subject becomes too
+  broad or long-lived for chronological daily entries alone.
+
+## 2026-07-22 Chat Addendum: Project Status Document and GitHub Sync
+
+### Documentation and Synchronization
+
+- This chat created `Notes/faultscan_project_status.md`, a concise scientific
+  status document distilled from the cumulative chat summary. It records the
+  project purpose, data sources, processing workflow, active configuration,
+  current outputs and interpretations, plotting behavior, next steps, and open
+  questions. It is intended as a quick orientation document rather than a
+  replacement for the detailed chronological summary or daily log.
+- The working project update was tested with
+  `conda run -n vidale_main python -m unittest tests.test_align_stack_smoke`;
+  all 23 smoke tests passed. The update was committed as `fdf9001` (`Add
+  alignment tools and project status notes`) and pushed to `origin/main` on
+  2026-07-22.
+- `.DS_Store` was deliberately left uncommitted as local macOS metadata. No
+  research processing run, configuration change, or scientific result was
+  produced solely by the documentation-and-sync portion of this chat.
+
+## 2026-07-26 Chat Addendum: Station-Static Modes, Stacker Workflow, and Stack Screening
+
+### Repository Organization and Configuration Decisions
+
+- This chat established `README.md` as the concise program and workflow
+  overview and `TASKS.md` as the short curated queue. Task entries were
+  expanded with purpose, completion criteria, relevant files, and suggested
+  approach without implementing the tasks. Daily logs use
+  `Notes/daily/YYYY-MM-DD.md`; completed tasks may be checked and either
+  retained, archived, or deleted when their history is not useful.
+- The former Boolean station-static switch was replaced by
+  `station_static_mode` with three explicit values:
+  - `none`: apply relative TauP station travel times only and perform no
+    station residual-lag search.
+  - `tabulated`: add the configured station-table correction to the TauP
+    shift and evaluate correlation at that fixed alignment.
+  - `cross_correlation`: add a waveform-estimated residual lag to the TauP
+    shift and write measured station-static workbooks.
+- Legacy JSON remains supported: `use_station_static_correction: true` maps
+  to `tabulated`, and `false` maps to `cross_correlation`. The active
+  configuration was migrated to `station_static_mode: "tabulated"`.
+- Station and event correction choices remain independent. In tabulated
+  station mode there is no varying-lag station search; the correlation used
+  for station quality is measured at the imposed TauP-plus-table alignment.
+  Cross-event varying-lag alignment is controlled separately by
+  `use_event_static_correction`.
+- These changes, the documentation/task files, daily logs, static-comparison
+  artifact, tests, and revised stacker workflow were committed and pushed as
+  `4348661` (`Add static alignment modes and stacker workflow`) on
+  2026-07-25.
+
+### Static-Shift Comparison and Interpretation
+
+- The durable comparison artifact
+  `outputs/static_comparison_20260724/CI_40353552_static_shift_comparison_3-10Hz.xlsx`
+  compares stored and correlation-estimated S station shifts for event
+  `CI_40353552` at 3--10 Hz. It contains 278 matched stations per component;
+  251 Z, 278 R, and 274 T traces passed its correlation screen.
+- The workbook reports stored-versus-estimated correlations of 0.315 for Z,
+  0.962 for R, and -0.064 for T. For this event and report, the stored S
+  correction closely follows the radial estimate but not the vertical or
+  transverse estimates. This is a limited one-event observation, not a
+  validated component-independent station correction.
+- Exploratory comparisons were also discussed at 1--4 Hz and 8--20 Hz,
+  including baseline removal before comparing shifts. No durable matching
+  output artifact for those bands was confirmed in the repository, so those
+  cases should be rerun before their numerical results are treated as project
+  findings.
+
+### Corrected `stacker.py` Workflow
+
+- The earlier `stacker.py` read fixed continuous files under a frequency-named
+  directory and was not connected to `align_stack` output. It was replaced
+  with a postprocessor that reads per-event
+  `<event>/<event>_<component>_stack.mseed` files and parameter snapshots from
+  one explicit timestamped `align_stack` run.
+- The research output prefix
+  `/Users/jvidale/Documents/Research/FaultScanR/output/2026` is implicit. For
+  example, `--run 0724_153034_7601` selects
+  `output/20260724_153034_7601`. `--components Z R T`, `Z T`, or a single
+  component processes exactly the requested components. Stacker does not
+  refilter the inputs; its usable passband is inherited from the selected
+  `align_stack` run.
+- Stacker cross-aligns the event stacks to the configured reference event
+  within the run's bounded event-stack lag, normalizes each event stack, and
+  draws individual traces plus a point-by-point `nanmedian` as the heavy black
+  trace.
+- Event selection was tightened to accept only catalog rows whose `skip`
+  value is numerically zero. A `smaller` masking policy replaces the fixed
+  4.6--6.0 s window after each smaller interfering event origin with `NaN`;
+  each masked segment is 1.4 s. Other policies are
+  `comparable_or_larger`, `all`, and `none`.
+- Editable `DEFAULT_*` values near the top of `stacker.py` make the VS Code
+  Run triangle reproduce the chosen run, components, masking, and display
+  behavior without command-line arguments. At the recorded checkpoint the
+  defaults select run `0724_153034_7601`, Z/R/T, smaller-event masking,
+  overlay-only output, an interactive Matplotlib window, and no PNG save.
+  Command-line arguments still override every default.
+
+### Runs, Plots, and Performance Observation
+
+- Stacker was run on `align_stack` output
+  `20260724_153034_7601`, a 3--10 Hz Z/R/T run. The saved stacker directory
+  contains:
+  - `stack_segments_overlay.png`
+  - `stack_segments_median.png`
+  - `stack_segments_offset_pre_mask.png`
+  - `stack_segments_offset_post_mask.png`
+  - `stack_segments_overlay_smaller_events_masked.png`
+- The stricter `skip = 0` selection identified 27 events with all three
+  component stacks and was displayed interactively with saving disabled.
+  The saved smaller-event-masked PNG predates that final no-save interactive
+  invocation and should not be assumed to document the strict 27-event
+  selection without regeneration.
+- The selected `align_stack` run produced 639 PNGs and 105 component-stack
+  MiniSEED files; 315 PNGs were individual-seismogram pages. Its first and
+  last event snapshots were about 7 minutes 35 seconds apart. This supports
+  the implementation-level inference that figure creation and saving,
+  especially with individual and record-section plotting enabled, dominate
+  runtime more than fixed-alignment correlation and averaging. Waveform
+  reading, filtering, TauP calculations, and horizontal rotation remain the
+  other principal costs.
+
+### Correlation Screening Fix and Verification
+
+- Review found that stations below `r_window_min` were marked rejected and
+  excluded from the Stage 2 selected stack, but were still appended to
+  `aligned_bank_all` and therefore contributed to the final event mean.
+- The final-stack path was corrected to average only `aligned_bank`, which
+  contains stations passing the correlation screen. Rejected traces remain
+  available for diagnostic plots, station correlations, and rejected-row
+  reporting but no longer affect the event-stack MiniSEED used by stacker.
+- Regression coverage confirms that adding a rejected trace cannot change the
+  final stack. At the implementation checkpoint, focused alignment tests
+  passed 42 tests and full discovery passed all 58 tests in `vidale_main`.
+
+### Unresolved and Required Follow-Up
+
+- Existing run `20260724_153034_7601` and its stacker figures were generated
+  before the final rejected-trace exclusion was established. Rerun
+  `align_stack.py`, update stacker's `DEFAULT_RUN`, and rerun stacker before
+  interpreting regenerated event medians scientifically.
+- Complete FS-003 and FS-004 by validating `none`, `tabulated`, and
+  `cross_correlation` across representative events, components, frequency
+  bands, station counts, alignment correlations, and stack coherence.
+- Decide whether stacker's fixed 4.6--6.0 s interfering-event mask should
+  remain a common S-window or be replaced by event-specific predicted arrival
+  windows.
+- The stored correction's strong agreement with R but disagreement with Z/T
+  remains unexplained; orientation, phase selection, site response, signal
+  quality, and event dependence remain candidate causes.
+
+## 2026-07-26 Chat Addendum: Runtime Repair, Plot Limits, and Pre-P Noise Screening
+
+### Runtime Repair and Stacker Plot Control
+
+- A partial `aligned_bank_all` to `aligned_bank` refactor caused a real
+  `KeyError` in `align_stack.py`: Stage 3 returned `aligned_bank`, while the
+  final-stack caller still requested the removed `aligned_bank_all` key. The
+  caller was corrected to use and pass `aligned_bank`, matching the
+  correlation-screened final-stack behavior described above.
+- `stacker.py` gained `--amplitude-limits MIN MAX`, defaulting to `-0.1 0.1`.
+  It sets the visible y-axis range for overlay and median plots; offset plots
+  retain their unbounded offset scale so stacked traces remain readable.
+- The runtime repair and focused stacker/alignment tests were run in
+  `vidale_main`; they used temporary test outputs only. No new scientific
+  processing run, research output, or plot interpretation was produced by
+  these fixes.
+
+### Pre-P Trace-Quality Rejection
+
+- `align_stack.py` and `align_utils.py` now apply an additional station-screen
+  before a trace enters the final event stack. For each station with a
+  computable TauP P arrival, the code calculates
+  `max(abs(entire trace)) / median(abs(pre-P samples))`.
+- The active `rp_input.json` setting is
+  `trace_peak_to_pre_p_median_min: 10.0`. A trace is rejected when this ratio
+  is **less than** 10, indicating that its strongest waveform amplitude is
+  insufficiently above the pre-P background level. A station without a
+  computable P arrival is not rejected by this additional rule. Setting the
+  threshold to `null` disables it.
+- The threshold is written into run-parameter snapshots. Per-component console
+  output now separately reports accepted traces, traces rejected for any
+  reason, correlation-threshold failures, and
+  trace-peak/pre-P-median-threshold failures. A trace that fails both tests is
+  included in both criterion counts but only once in the overall rejection
+  total.
+- The requested interpretation is that this is a background-noise screen, not
+  a rejection of unusually large signals: high pre-P noise raises the
+  denominator and lowers the ratio.
+
+### Verification and Follow-Up
+
+- Focused alignment tests, including regression coverage for the ratio
+  calculation and separate rejection counts, passed 45 tests in
+  `vidale_main` after the final `< 10` criterion was implemented.
+- The value 10.0 is an operational threshold, not yet a scientifically
+  validated quality criterion. FS-003/FS-004 should measure how it changes
+  accepted station counts, correlations, and stack coherence across events,
+  components, and frequency bands before it is treated as a settled setting.
+- VS Code can warn when its editor buffer conflicts with a file changed on
+  disk. In that situation, compare or reload the disk version before saving;
+  keeping the stale editor version can overwrite these uncommitted changes.
+
+## 2026-07-26 Chat Addendum: Durable Codex Guidance and Documentation Sync
+
+### Decisions and Repository Context
+
+- A concise repository-root `AGENTS.md` was added to give Codex durable
+  FaultScan-specific guidance. It directs agents to preserve unrelated working
+  tree changes, avoid scientific processing and input/output mutations unless
+  explicitly requested, use the README/status/goals/tasks/daily-note files for
+  their respective purposes, and distinguish implementation state from
+  validated scientific results.
+- The guidance records the `vidale_main` full-test command and requires tests
+  and scientific processing to be reported separately. It also requires
+  provenance for configuration and outputs, and prohibits overwriting
+  station-static tables or catalog time shifts without an explicit request and
+  validation plan.
+- Automation-local `memory.md` remains useful only for continuity of the
+  daily-log automation on this machine. It is not a substitute for
+  repository-tracked guidance or project notes.
+
+### Documentation Synchronization
+
+- Daily logs for 2026-07-25 and 2026-07-26 were committed and pushed as
+  `e60e73b` (`Add July 25 and 26 daily logs`). The synchronization contained
+  documentation only; it did not publish the unrelated pending source,
+  configuration, test, or research-processing changes.
+- This addendum records project workflow and documentation decisions only. It
+  introduces no scientific result, output file, plot, or completed task.
