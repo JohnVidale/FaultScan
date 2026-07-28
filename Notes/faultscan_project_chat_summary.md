@@ -562,3 +562,41 @@ The shared waveform reader excludes these stations before reading, rotation, ali
   configuration, test, or research-processing changes.
 - This addendum records project workflow and documentation decisions only. It
   introduces no scientific result, output file, plot, or completed task.
+
+## 2026-07-27 Chat Addendum: Documentation Review and GitHub Synchronization
+
+### Scope and Synchronization
+
+- This chat requested an evidence-based daily log, an update to this durable
+  summary, and synchronization with the configured GitHub remote. `git fetch
+  origin` confirmed that local `main` and `origin/main` were aligned at
+  `997d177` before the documentation updates; no remote-only commits were
+  found.
+- The review covered the repository state, recent commits and reflog, task
+  queue, active configuration, README, project status, prior daily log, and
+  this summary. It did not run tests or the scientific processing pipeline,
+  modify scientific inputs or outputs, or complete a task.
+
+### Current Pending Implementation State
+
+- The active pending `rp_input.json` selects 250 Hz snippets, all channels,
+  S alignment, a 1--4 Hz band, a -2--12 s interval, enabled catalog event
+  corrections, `station_static_mode: "tabulated"`, a 0.2 correlation
+  threshold, a 0.05 s maximum station move, and
+  `trace_peak_to_pre_p_median_min: 20.0`. JSON event-location override and
+  individual/overlay/record-section plotting are enabled.
+- The uncommitted worktree also contains changes to alignment utilities and
+  pipeline code, stacker, the R/T snippet plotter, tests, README, and the
+  project-status note, plus a new untracked snippet-plotter test. The working
+  tree also contains local `.DS_Store` metadata, which is not project evidence.
+- These changes are implementation state only. The earlier recorded 45-test
+  focused checkpoint and 58-test full-discovery checkpoint remain historical
+  claims; they were not rerun or independently reviewed in this chat. No new
+  scientific processing or result was established.
+
+### Durable Follow-Up
+
+- Keep FS-003, FS-004, and FS-005 open until their explicit representative
+  validation criteria are met. In particular, evaluate station-static modes
+  with matched runs and do not treat the current 1--4 Hz tabulated
+  configuration as a scientific conclusion.
