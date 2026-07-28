@@ -1,29 +1,12 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import stacker
 
 
 class StackerTests(unittest.TestCase):
-    def test_resolve_run_directory_adds_implicit_2026_prefix(self):
-        with patch.object(stacker, "OUTPUT_ROOT", Path("/example/output")):
-            path = stacker.resolve_run_directory("0722_182322_4666")
-
-        self.assertEqual(path, Path("/example/output/20260722_182322_4666"))
-
-    def test_resolve_run_directory_accepts_complete_run_name(self):
-        with patch.object(stacker, "OUTPUT_ROOT", Path("/example/output")):
-            path = stacker.resolve_run_directory("20260722_182322_4666")
-
-        self.assertEqual(path, Path("/example/output/20260722_182322_4666"))
-
-    def test_resolve_run_directory_rejects_path_or_bad_format(self):
-        for value in ("../20260722_182322_4666", "0722", "/tmp/run"):
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                stacker.resolve_run_directory(value)
-
     def test_normalize_components_preserves_order_and_removes_duplicates(self):
         self.assertEqual(
             stacker.normalize_components(["z", "T", "Z"]),
@@ -53,7 +36,6 @@ class StackerTests(unittest.TestCase):
     def test_argument_free_run_uses_editor_defaults(self):
         args = stacker.build_argument_parser().parse_args([])
 
-        self.assertEqual(args.run, stacker.DEFAULT_RUN)
         self.assertEqual(args.components, stacker.DEFAULT_COMPONENTS)
         self.assertEqual(
             args.mask_other_events,
@@ -67,8 +49,6 @@ class StackerTests(unittest.TestCase):
     def test_command_line_can_override_editor_defaults(self):
         args = stacker.build_argument_parser().parse_args(
             [
-                "--run",
-                "0722_182322_4666",
                 "--components",
                 "Z",
                 "T",
@@ -83,7 +63,6 @@ class StackerTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(args.run, "0722_182322_4666")
         self.assertEqual(args.components, ["Z", "T"])
         self.assertEqual(args.mask_other_events, "all")
         self.assertFalse(args.overlay_only)
@@ -109,6 +88,65 @@ class StackerTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "snapshots disagree"):
                 stacker.load_run_parameters(run_dir)
+
+    def test_write_plots_builds_all_requested_figures_before_showing(self):
+        call_order = []
+        row_figures = [
+            Mock(name="overlay_figure"),
+            Mock(name="pre_figure"),
+            Mock(name="post_figure"),
+        ]
+        median_figure = Mock(name="median_figure")
+
+        def fake_rows(*args, **kwargs):
+            call_order.append(f"write_{args[2]}")
+            return row_figures.pop(0)
+
+        def fake_median(*args, **kwargs):
+            call_order.append("write_median")
+            return median_figure
+
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = Path(temporary) / "stack_output"
+            run_dir.mkdir()
+            with patch.object(
+                stacker,
+                "_plot_component_rows",
+                side_effect=fake_rows,
+            ), patch.object(
+                stacker,
+                "_plot_component_medians",
+                side_effect=fake_median,
+            ), patch.object(
+                stacker.plt,
+                "show",
+                side_effect=lambda: call_order.append("show"),
+            ), patch.object(
+                stacker.plt,
+                "close",
+            ):
+                output_dir = stacker.write_plots(
+                    processed_by_component={"Z": []},
+                    components=["Z"],
+                    run_dir=run_dir,
+                    parameters={"min_freq": 3, "max_freq": 10},
+                    overlay_only=False,
+                    save_plots=True,
+                    show_plots=True,
+                )
+
+            self.assertEqual(output_dir, run_dir)
+
+        self.assertEqual(
+            call_order,
+            [
+                "write_post_mask",
+                "write_median",
+                "write_pre_mask",
+                "write_post_mask",
+                "show",
+            ],
+        )
 
 
 if __name__ == "__main__":

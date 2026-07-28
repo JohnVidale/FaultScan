@@ -1,10 +1,9 @@
-"""Compare the per-event component stacks produced by one align_stack run."""
+"""Compare per-event component stacks in the shared stack_output directory."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,8 +13,7 @@ import pandas as pd
 from obspy import Trace, UTCDateTime, read
 
 
-OUTPUT_ROOT = Path("/Users/jvidale/Documents/Research/FaultScanR/output")
-IMPLICIT_RUN_PREFIX = "2026"
+STACK_OUTPUT_DIR = Path("/Users/jvidale/Documents/Research/FaultScanR/stack_output")
 CATALOG_FILE = Path(
     "/Users/jvidale/Documents/Research/FaultScanR/event_sta_info/catalog_local_hand.xlsx"
 )
@@ -27,8 +25,8 @@ COMPONENT_LABELS = {
     "T": "Transverse (T)",
 }
 
-ALIGN_WINDOW_START = 4.6
-ALIGN_WINDOW_END = 6.0
+ALIGN_WINDOW_START = 5.1
+ALIGN_WINDOW_END = 5.9
 MAG_MIN = 0.0
 MAG_DIFF_MIN = 0.8
 OFFSET_STEP = 0.6
@@ -37,14 +35,11 @@ SHOW_OFFSET_TRACES = True
 SHOW_MEDIAN_TRACE = True
 MASK_POLICIES = ("comparable_or_larger", "smaller", "all", "none")
 
-# Defaults used when stacker.py is run with the triangle button in VS Code.
-# Edit these values to change an argument-free interactive run.
-DEFAULT_RUN = "0724_185013_6649"
 DEFAULT_COMPONENTS = ["Z", "R", "T"]
 DEFAULT_MASK_OTHER_EVENTS = "smaller"
-DEFAULT_OVERLAY_ONLY = True
+DEFAULT_OVERLAY_ONLY = False
 DEFAULT_SHOW_PLOTS = True
-DEFAULT_SAVE_PLOTS = False
+DEFAULT_SAVE_PLOTS = True
 DEFAULT_AMPLITUDE_LIMITS = (-0.1, 0.1)
 
 
@@ -63,22 +58,6 @@ class ProcessedStack:
     time: np.ndarray
     pre_mask: np.ndarray
     post_mask: np.ndarray
-
-
-def resolve_run_directory(run_suffix: str) -> Path:
-    """Resolve a short run suffix beneath the fixed 2026 output prefix."""
-    value = run_suffix.strip()
-    if value.startswith(IMPLICIT_RUN_PREFIX):
-        run_id = value
-    else:
-        run_id = f"{IMPLICIT_RUN_PREFIX}{value}"
-
-    if not re.fullmatch(r"2026\d{4}_\d{6}_\d{4}", run_id):
-        raise ValueError(
-            "Run must be the suffix after 2026, such as '0722_182322_4666' "
-            "(the complete 2026-prefixed run name is also accepted)."
-        )
-    return OUTPUT_ROOT / run_id
 
 
 def normalize_components(components: list[str]) -> list[str]:
@@ -105,7 +84,7 @@ def load_catalog(path: Path) -> pd.DataFrame:
 
 
 def load_run_parameters(run_dir: Path) -> dict:
-    """Read and cross-check the parameter snapshots stored under a run."""
+    """Read and cross-check parameter snapshots stored under stack_output."""
     snapshot_paths = sorted(run_dir.glob("*/rp_*.json"))
     if not snapshot_paths:
         raise FileNotFoundError(f"No run-parameter snapshot found under {run_dir}")
@@ -378,8 +357,7 @@ def _plot_component_rows(
     title: str,
     output_path: Path | None,
     amplitude_limits: tuple[float, float] | None = None,
-    show_plot: bool = False,
-) -> None:
+) -> plt.Figure:
     fig, axes = plt.subplots(
         len(components),
         1,
@@ -420,10 +398,7 @@ def _plot_component_rows(
     if output_path is not None:
         fig.savefig(output_path, dpi=300, bbox_inches="tight")
         print(f"✓ Wrote plot: {output_path}")
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
+    return fig
 
 
 def _plot_component_medians(
@@ -432,8 +407,7 @@ def _plot_component_medians(
     title: str,
     output_path: Path | None,
     amplitude_limits: tuple[float, float] | None = None,
-    show_plot: bool = False,
-) -> None:
+) -> plt.Figure:
     fig, axes = plt.subplots(
         len(components),
         1,
@@ -456,10 +430,7 @@ def _plot_component_medians(
     if output_path is not None:
         fig.savefig(output_path, dpi=300, bbox_inches="tight")
         print(f"✓ Wrote plot: {output_path}")
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
+    return fig
 
 
 def write_plots(
@@ -473,7 +444,7 @@ def write_plots(
     show_plots: bool = False,
     amplitude_limits: tuple[float, float] | None = DEFAULT_AMPLITUDE_LIMITS,
 ) -> Path:
-    output_dir = run_dir / "stacker"
+    output_dir = run_dir
     if save_plots:
         output_dir.mkdir(parents=True, exist_ok=True)
     band = f"{parameters.get('min_freq', '?')}–{parameters.get('max_freq', '?')} Hz"
@@ -485,62 +456,64 @@ def write_plots(
         filename_suffix = f"_{mask_policy}_events_masked"
         mask_title = f"{mask_policy}-event arrivals masked"
 
-    _plot_component_rows(
-        processed_by_component,
-        components,
-        "post_mask",
-        False,
-        f"Aligned event stacks and median; {mask_title}\n{common_title}",
-        (
-            output_dir / f"stack_segments_overlay{filename_suffix}.png"
-            if save_plots
-            else None
-        ),
-        amplitude_limits=amplitude_limits,
-        show_plot=show_plots,
-    )
-    if SHOW_MEDIAN_TRACE and not overlay_only:
-        _plot_component_medians(
-            processed_by_component,
-            components,
-            f"Aligned event-stack medians\n{common_title}",
-            output_dir / "stack_segments_median.png" if save_plots else None,
-            amplitude_limits=amplitude_limits,
-            show_plot=show_plots,
-        )
-    if SHOW_OFFSET_TRACES and not overlay_only:
-        _plot_component_rows(
-            processed_by_component,
-            components,
-            "pre_mask",
-            True,
-            f"Aligned event stacks before masking\n{common_title}",
-            output_dir / "stack_segments_offset_pre_mask.png" if save_plots else None,
-            show_plot=show_plots,
-        )
+    figures = [
         _plot_component_rows(
             processed_by_component,
             components,
             "post_mask",
-            True,
-            f"Aligned event stacks after masking\n{common_title}",
-            output_dir / "stack_segments_offset_post_mask.png" if save_plots else None,
-            show_plot=show_plots,
+            False,
+            f"Aligned event stacks and median; {mask_title}\n{common_title}",
+            (
+                output_dir / f"stack_segments_overlay{filename_suffix}.png"
+                if save_plots
+                else None
+            ),
+            amplitude_limits=amplitude_limits,
         )
+    ]
+    if SHOW_MEDIAN_TRACE and not overlay_only:
+        figures.append(
+            _plot_component_medians(
+                processed_by_component,
+                components,
+                f"Aligned event-stack medians\n{common_title}",
+                output_dir / "stack_segments_median.png" if save_plots else None,
+                amplitude_limits=amplitude_limits,
+            )
+        )
+    if SHOW_OFFSET_TRACES and not overlay_only:
+        figures.append(
+            _plot_component_rows(
+                processed_by_component,
+                components,
+                "pre_mask",
+                True,
+                f"Aligned event stacks before masking\n{common_title}",
+                output_dir / "stack_segments_offset_pre_mask.png" if save_plots else None,
+            )
+        )
+        figures.append(
+            _plot_component_rows(
+                processed_by_component,
+                components,
+                "post_mask",
+                True,
+                f"Aligned event stacks after masking\n{common_title}",
+                output_dir / "stack_segments_offset_post_mask.png" if save_plots else None,
+            )
+        )
+    if show_plots:
+        plt.show()
+    for figure in figures:
+        plt.close(figure)
     return output_dir
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Compare per-event component stacks from one align_stack run."
-    )
-    parser.add_argument(
-        "--run",
-        default=DEFAULT_RUN,
-        help=(
-            "Run suffix after the implicit 2026 prefix, for example "
-            f"0722_182322_4666 (default: {DEFAULT_RUN})."
-        ),
+        description=(
+            "Compare per-event component stacks in the shared stack_output directory."
+        )
     )
     parser.add_argument(
         "--components",
@@ -624,12 +597,12 @@ def main(argv: list[str] | None = None) -> None:
     amplitude_limits = tuple(args.amplitude_limits)
     if amplitude_limits[0] >= amplitude_limits[1]:
         raise ValueError("--amplitude-limits requires MIN to be less than MAX")
-    run_dir = resolve_run_directory(args.run)
+    run_dir = STACK_OUTPUT_DIR
     components = normalize_components(args.components)
     if not run_dir.is_dir():
-        raise FileNotFoundError(f"align_stack run directory not found: {run_dir}")
+        raise FileNotFoundError(f"align_stack output directory not found: {run_dir}")
 
-    print(f"Using align_stack run: {run_dir}")
+    print(f"Using align_stack input/output directory: {run_dir}")
     print(f"Processing components: {' '.join(components)}")
     parameters = load_run_parameters(run_dir)
     catalog = load_catalog(CATALOG_FILE)
