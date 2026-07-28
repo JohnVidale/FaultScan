@@ -69,7 +69,7 @@ the research tree at:
 ├── Sgrams/
 │   ├── 20220930_<rate>Hz/
 │   └── Snippets_<rate>Hz/
-└── output/
+└── stack_output/
 ```
 
 The principal inputs are:
@@ -83,15 +83,16 @@ The principal inputs are:
 - `rp_input.json`: frequency band, time windows, phase, components, event list,
   input mode, alignment controls, and plotting options.
 
-Each pipeline run creates a timestamped directory under `output/`. Depending on
-configuration, products include:
+`align_stack.py` writes directly to `stack_output/`, with one subdirectory per
+event. A later run replaces files with the same names but does not delete
+unrelated event directories. Depending on configuration, products include:
 
 - Per-event aligned component stacks and MiniSEED files.
 - Record-section, stage-stack, envelope, correlation, and station-map figures.
 - A JSON snapshot of the parameters used for the run.
 - All-event component-stack figures.
 - Cross-event alignment workbooks and offset-stack figures.
-- Per-event station-residual workbooks under `output/Statics` when
+- Per-event station-residual workbooks under `stack_output/Statics` when
   `station_static_mode` is `cross_correlation`.
 
 Many scripts contain user-specific absolute default paths. Check `rp_input.json`
@@ -166,12 +167,30 @@ conda run -n vidale_main python plot_event_rt_snippets.py \
   --event CI_40353864
 ```
 
-Compare Z and T stacks from an `align_stack` run. The fixed
-`/Users/jvidale/Documents/Research/FaultScanR/output/2026` prefix is implicit:
+The Z, R, and T traces for each station are shifted so their TauP-predicted S
+pick is at 0 s and is marked in green; Z is gray. Each station's configured
+static from `stations.xlsx` is marked and labeled in purple. Edit `START_TIME`
+and `END_TIME` near the top of `plot_event_rt_snippets.py` to change the
+S-relative display window; `MIN_FREQ` and `MAX_FREQ` control the default
+3–10 Hz bandpass. Corresponding command-line options override these defaults.
+The plot also reads `win_pre`, `win_post`, and `move_limit_sec` from
+`rp_input.json` and marks the correlation window and its expanded shift-search
+limits. `APPLY_STATION_STATICS_R`, `APPLY_STATION_STATICS_T`, and
+`APPLY_STATION_STATICS_Z` independently control whether each component is
+shifted left by its value from `stations.xlsx`. The corresponding command-line
+controls are `--shift-r`, `--shift-t`, and `--shift-z`, with `--no-shift-r`,
+`--no-shift-t`, and `--no-shift-z` disabling individual components.
+`--no-time-shift` disables statics globally, while an individual component
+option can override it. Use `--no-z` to omit the vertical-data read and produce
+R/T-only plots; `--include-z` enables Z/R/T behavior.
+
+Compare Z and T stacks written by `align_stack.py`. `stacker.py` reads from and
+writes plots directly to
+`/Users/jvidale/Documents/Research/FaultScanR/stack_output/`:
 
 ```bash
 conda run -n vidale_main python stacker.py \
-  --run 0722_182322_4666 --components Z T
+  --components Z T
 ```
 
 Running `stacker.py` with the VS Code triangle and no arguments uses the
@@ -182,7 +201,7 @@ Preview a catalog shift update before modifying the workbook:
 
 ```bash
 conda run -n vidale_main python tools/update_catalog_time_shifts.py \
-  R /path/to/timestamped_run --dry-run
+  R /path/to/stack_output --dry-run
 ```
 
 Only remove `--dry-run` after verifying the reported source column, baseline,

@@ -32,7 +32,7 @@ comparisons are physically meaningful.
    timing, and stacked. Catalog `time shift` values are applied to all Z, R,
    and T processing.
 4. Residual station shifts are written as per-event, component/phase-aware
-   static workbooks in `output/Statics`, unless precomputed station-static
+   static workbooks in `stack_output/Statics`, unless precomputed station-static
    correction is enabled.
 5. `plot_statics_by_station.py` removes robust per-event baselines, rejects
    outliers with MAD screening, estimates per-station median statics, and
