@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from openpyxl.styles import Alignment, Font, PatternFill
 from typing import cast
 from matplotlib.lines import Line2D
 from pathlib import Path
@@ -80,6 +81,7 @@ event_alignment_reference = "CI_40353472"
 event_stack_alignment_max_shift_sec = 0.2
 use_event_static_correction = False  # True: catalog shifts; False: measure event-stack residuals
 event_progress_say_rate = 130
+trace_peak_to_pre_p_median_min: float | None = 10.0
 STATION_STATIC_MODES = frozenset({"none", "tabulated", "cross_correlation"})
 station_static_mode = "cross_correlation"
 station_static_file = info_root / "stations.xlsx"
@@ -126,7 +128,7 @@ def apply_input_config(config_file: Path) -> None:
     global event_alignment_reference
     global event_stack_alignment_max_shift_sec
     global use_event_static_correction
-    global event_progress_say_rate
+    global event_progress_say_rate, trace_peak_to_pre_p_median_min
     global station_static_mode, station_static_file, station_static_column
     global _station_static_cache
     global show_individual_seismograms, show_record_section_plot
@@ -166,6 +168,21 @@ def apply_input_config(config_file: Path) -> None:
     win_post = float(cfg.get("win_post", win_post))
     r_window_min = float(cfg.get("r_window_min", r_window_min))
     move_limit_sec = float(cfg.get("move_limit_sec", move_limit_sec))
+    configured_trace_ratio = cfg.get(
+        "trace_peak_to_pre_p_median_min",
+        cfg.get("trace_peak_to_pre_p_median_max", trace_peak_to_pre_p_median_min),
+    )
+    trace_peak_to_pre_p_median_min = (
+        None if configured_trace_ratio is None else float(configured_trace_ratio)
+    )
+    if (
+        trace_peak_to_pre_p_median_min is not None
+        and trace_peak_to_pre_p_median_min < 1.0
+    ):
+        raise ValueError(
+            "trace_peak_to_pre_p_median_min must be at least 1.0 or null; "
+            f"got {trace_peak_to_pre_p_median_min}"
+        )
 
     all_channels = bool(cfg.get("all_channels", all_channels))
     component = str(cfg.get("component", component))
@@ -267,7 +284,7 @@ model = TauPyModel(model="iasp91")
 
 
 def write_run_parameter_snapshot(output_dir: Path | str) -> Path:
-    """Write a timestamped JSON snapshot of run parameters for reproducibility."""
+    """Write the latest JSON snapshot of run parameters for reproducibility."""
     output_dir = Path(output_dir)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-2]
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -290,6 +307,7 @@ def write_run_parameter_snapshot(output_dir: Path | str) -> Path:
         "win_pre": win_pre,
         "win_post": win_post,
         "r_window_min": r_window_min,
+        "trace_peak_to_pre_p_median_min": trace_peak_to_pre_p_median_min,
         "move_limit_sec": move_limit_sec,
         "all_channels": all_channels,
         "component": component,
@@ -315,7 +333,7 @@ def write_run_parameter_snapshot(output_dir: Path | str) -> Path:
         "show_record_section_plot": show_record_section_plot,
     }
 
-    snapshot_path = output_dir / f"rp_{timestamp}.json"
+    snapshot_path = output_dir / "rp_latest.json"
     with snapshot_path.open("w", encoding="utf-8") as f:
         json.dump(snapshot, f, indent=2)
 
@@ -324,23 +342,88 @@ def write_run_parameter_snapshot(output_dir: Path | str) -> Path:
 
 
 def initialize_run_output_dir(base_output_root: Path) -> Path:
-    """Create and return a timestamped directory for one pipeline run."""
+    """Create and return the shared align_stack output directory."""
     global RUN_OUTPUT_DIR
-    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-2]
-    RUN_OUTPUT_DIR = base_output_root / run_timestamp
+    RUN_OUTPUT_DIR = base_output_root
     RUN_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Run output directory: {RUN_OUTPUT_DIR}")
+    print(f"align_stack output directory: {RUN_OUTPUT_DIR}")
     return RUN_OUTPUT_DIR
 
 
 def get_run_event_output_dir(eve_id: str) -> Path:
     """Return per-event output directory under the active run directory."""
     if RUN_OUTPUT_DIR is None:
-        fallback_root = Path(path_prefix + "output")
+        fallback_root = Path(path_prefix) / "stack_output"
         initialize_run_output_dir(fallback_root)
     event_dir = RUN_OUTPUT_DIR / eve_id  # type: ignore[union-attr]
     event_dir.mkdir(parents=True, exist_ok=True)
     return event_dir
+
+
+def write_screening_failure_counts(
+    rows: list[dict],
+    run_output_dir: Path,
+) -> Path:
+    """Write per-event/component screening counts for the active run."""
+    out_file = run_output_dir / "screening_failure_counts.xlsx"
+    columns = [
+        "event_id",
+        "component",
+        "total_traces",
+        "accepted_traces",
+        "failed_any_threshold",
+        "failed_correlation_threshold",
+        "failed_noise_ratio_threshold",
+        "correlation_threshold_min",
+        "noise_ratio_threshold_min",
+    ]
+    sheet_name = "Screening counts"
+    frame = pd.DataFrame(rows, columns=columns)
+    with pd.ExcelWriter(out_file, engine="openpyxl") as writer:
+        frame.to_excel(writer, index=False, sheet_name=sheet_name)
+        worksheet = writer.sheets[sheet_name]
+        worksheet.freeze_panes = "A2"
+        worksheet.auto_filter.ref = worksheet.dimensions
+        worksheet.row_dimensions[1].height = 34
+
+        header_fill = PatternFill("solid", fgColor="1F4E78")
+        for cell in worksheet[1]:
+            cell.font = Font(color="FFFFFF", bold=True)
+            cell.fill = header_fill
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center",
+                wrap_text=True,
+            )
+
+        column_widths = (16, 12, 14, 16, 20, 28, 28, 26, 26)
+        for column_cells, width in zip(worksheet.columns, column_widths):
+            worksheet.column_dimensions[column_cells[0].column_letter].width = width
+
+        for row in worksheet.iter_rows(min_row=2, min_col=3, max_col=7):
+            for cell in row:
+                cell.number_format = "0"
+        for row in worksheet.iter_rows(min_row=2, min_col=8, max_col=9):
+            for cell in row:
+                cell.number_format = "0.00"
+    print(f"Screening failure counts saved to: {out_file}")
+    return out_file
+
+
+def event_has_zero_catalog_skip(eve_id: str) -> bool:
+    """Return True only when the event's catalog skip value is numerically zero."""
+    if catalog_local is None or not {"evid", "skip"}.issubset(catalog_local.columns):
+        return False
+
+    event_rows = catalog_local.loc[
+        catalog_local["evid"].astype(str) == str(eve_id),
+        "skip",
+    ]
+    if event_rows.empty:
+        return False
+
+    skip_value = pd.to_numeric(event_rows.iloc[0], errors="coerce")
+    return bool(pd.notna(skip_value) and float(skip_value) == 0.0)
 
 
 def write_component_phase_time_shifts(
@@ -398,7 +481,7 @@ def write_component_phase_time_shifts(
             }
         )
 
-    statics_dir = Path(path_prefix) / "output" / "Statics"
+    statics_dir = Path(path_prefix) / "stack_output" / "Statics"
     statics_dir.mkdir(parents=True, exist_ok=True)
     frequency_label = f"{min_freq_hz:g}-{max_freq_hz:g}Hz"
     out_file = statics_dir / (
@@ -2666,6 +2749,7 @@ def run_alignment_and_unpack(
     event_depth: float,
     align_phase_name: str,
     t_ref,
+    p_traveltime: float | None = None,
 ):
     """Compute alignment products and return unpacked values used by run_pipeline."""
     alignment = compute_alignment_products(
@@ -2678,6 +2762,7 @@ def run_alignment_and_unpack(
         event_depth=event_depth,
         align_phase_name=align_phase_name,
         t_ref=t_ref,
+        p_traveltime=p_traveltime,
     )
     return (
         alignment["npts"],
@@ -2691,6 +2776,9 @@ def run_alignment_and_unpack(
         alignment["selected_ids"],
         alignment["station_corr"],
         alignment["n_pass_window"],
+        alignment["n_rejected_correlation"],
+        alignment["n_rejected_trace_peak_to_pre_p"],
+        alignment["n_rejected_any"],
         alignment["pass_window_ids"],
         alignment["snippet_by_station"],
         alignment["ref_window"],
@@ -2822,6 +2910,7 @@ def compute_alignment_products(
     event_depth: float,
     align_phase_name: str,
     t_ref,
+    p_traveltime: float | None = None,
 ):
     """Run alignment stages and return all products needed by plotting/output."""
     # ---- Common length / sampling rate / windows ----
@@ -2854,6 +2943,20 @@ def compute_alignment_products(
         t_ref=t_ref,
         timing_state=timing_state,
     )
+    p_arrival_seconds_by_station = {}
+    if p_traveltime is not None:
+        p_shifts = compute_taup_station_shifts(
+            model_obj=model,
+            st_comp=st_comp,
+            event_depth=event_depth,
+            align_phase_name="P",
+            t_ref=p_traveltime,
+            timing_state=timing_state,
+        )
+        p_arrival_seconds_by_station = {
+            station_id: p_traveltime + shift
+            for station_id, shift in p_shifts.items()
+        }
     imposed_station_shifts = imposed_station_shifts_for_stream(st_comp, ref_station_id)
     measure_station_residuals = station_static_mode == "cross_correlation"
 
@@ -2885,12 +2988,20 @@ def compute_alignment_products(
         imposed_station_shifts=imposed_station_shifts,
         measure_station_residuals=measure_station_residuals,
         r_window_min=r_window_min,
+        p_arrival_seconds_by_station=p_arrival_seconds_by_station,
+        trace_peak_to_pre_p_median_min=trace_peak_to_pre_p_median_min,
+        start_time=start_time,
         timing_state=timing_state,
     )
     selected_aligned_stack = stage2_products["selected_aligned_stack"]
     selected_ids = stage2_products["selected_ids"]
     station_corr = stage2_products["station_corr"]
     n_pass_window = stage2_products["n_pass_window"]
+    n_rejected_correlation = stage2_products["n_rejected_correlation"]
+    n_rejected_trace_peak_to_pre_p = stage2_products[
+        "n_rejected_trace_peak_to_pre_p"
+    ]
+    n_rejected_any = stage2_products["n_rejected_any"]
     pass_window_ids = stage2_products["pass_window_ids"]
     snippet_by_station = stage2_products["snippet_by_station"]
     ref_window = stage2_products["ref_window"]
@@ -2946,6 +3057,9 @@ def compute_alignment_products(
         selected_ids=selected_ids,
         station_corr=station_corr,
         n_pass_window=n_pass_window,
+        n_rejected_correlation=n_rejected_correlation,
+        n_rejected_trace_peak_to_pre_p=n_rejected_trace_peak_to_pre_p,
+        n_rejected_any=n_rejected_any,
         pass_window_ids=pass_window_ids,
         snippet_by_station=snippet_by_station,
         ref_window=ref_window,
@@ -2959,9 +3073,10 @@ def compute_alignment_products(
     )
 def run_pipeline() -> None:
     global align_phase, move_limit_sec, start_time, end_time
-    base_output_root = Path(path_prefix + "output")
-    initialize_run_output_dir(base_output_root)
+    base_output_root = Path(path_prefix) / "stack_output"
+    run_output_dir = initialize_run_output_dir(base_output_root)
     snapshot_written_dirs: set[Path] = set()
+    screening_failure_rows: list[dict] = []
     component_stacks_by_name: dict[str, list[tuple[str, np.ndarray, np.ndarray, np.ndarray, dict]]] = {}
     # User-facing components: Z, R, T
     channels, process_as_three_comp, sel_comp_list = get_component_selection(
@@ -3048,6 +3163,9 @@ def run_pipeline() -> None:
                 selected_ids,
                 station_corr,
                 n_pass_window,
+                n_rejected_correlation,
+                n_rejected_trace_peak_to_pre_p,
+                n_rejected_any,
                 pass_window_ids,
                 snippet_by_station,
                 ref_window,
@@ -3068,7 +3186,28 @@ def run_pipeline() -> None:
                 event_depth=event_depth,
                 align_phase_name=align_phase,
                 t_ref=t_ref,
+                p_traveltime=p_traveltime,
             )
+            if event_has_zero_catalog_skip(eve_id):
+                screening_failure_rows.append(
+                    {
+                        "event_id": eve_id,
+                        "component": plot_comp,
+                        "total_traces": int(num_traces),
+                        "accepted_traces": int(len(selected_ids)),
+                        "failed_any_threshold": int(n_rejected_any),
+                        "failed_correlation_threshold": int(n_rejected_correlation),
+                        "failed_noise_ratio_threshold": int(
+                            n_rejected_trace_peak_to_pre_p
+                        ),
+                        "correlation_threshold_min": float(r_window_min),
+                        "noise_ratio_threshold_min": (
+                            None
+                            if trace_peak_to_pre_p_median_min is None
+                            else float(trace_peak_to_pre_p_median_min)
+                        ),
+                    }
+                )
             pass_window_ids_for_event = pass_window_ids
             component_stacks_by_name.setdefault(plot_comp, []).append(
                 (
@@ -3290,6 +3429,10 @@ def run_pipeline() -> None:
             except FileNotFoundError:
                 print(f"[INFO] Processed {event_count} events (macOS 'say' command unavailable).")
 
+    write_screening_failure_counts(
+        screening_failure_rows,
+        run_output_dir,
+    )
     plot_all_events_component_stacks(
         component_stacks=component_stacks_by_name,
         run_output_dir=RUN_OUTPUT_DIR,

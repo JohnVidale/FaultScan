@@ -13,6 +13,20 @@ class AlignStackSmokeTests(unittest.TestCase):
     def setUp(self):
         self.mod = importlib.import_module("align_stack")
 
+    def test_event_output_directory_uses_shared_stack_output_root(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            self.mod,
+            "path_prefix",
+            f"{tmp}/",
+        ), patch.object(
+            self.mod,
+            "RUN_OUTPUT_DIR",
+            None,
+        ):
+            event_dir = self.mod.get_run_event_output_dir("E1")
+
+        self.assertEqual(event_dir, Path(tmp) / "stack_output" / "E1")
+
     def test_start_plot_timing_returns_two_floats(self):
         wall, cpu = self.mod.start_plot_timing()
         self.assertIsInstance(wall, float)
@@ -297,16 +311,19 @@ class AlignStackSmokeTests(unittest.TestCase):
             "selected_ids": 9,
             "station_corr": 10,
             "n_pass_window": 11,
-            "pass_window_ids": 12,
-            "snippet_by_station": 13,
-            "ref_window": 14,
-            "selected_rows": 15,
-            "rejected_rows": 16,
-            "station_shifts": 17,
-            "aligned_traces_by_station": 18,
-            "t_abs": 19,
-            "mask": 20,
-            "stack_vec": 21,
+            "n_rejected_correlation": 12,
+            "n_rejected_trace_peak_to_pre_p": 13,
+            "n_rejected_any": 14,
+            "pass_window_ids": 15,
+            "snippet_by_station": 16,
+            "ref_window": 17,
+            "selected_rows": 18,
+            "rejected_rows": 19,
+            "station_shifts": 20,
+            "aligned_traces_by_station": 21,
+            "t_abs": 22,
+            "mask": 23,
+            "stack_vec": 24,
         }
         expected = tuple(sentinel[k] for k in (
             "npts",
@@ -320,6 +337,9 @@ class AlignStackSmokeTests(unittest.TestCase):
             "selected_ids",
             "station_corr",
             "n_pass_window",
+            "n_rejected_correlation",
+            "n_rejected_trace_peak_to_pre_p",
+            "n_rejected_any",
             "pass_window_ids",
             "snippet_by_station",
             "ref_window",
@@ -346,6 +366,60 @@ class AlignStackSmokeTests(unittest.TestCase):
             )
 
         self.assertEqual(out, expected)
+
+    def test_write_screening_failure_counts_writes_one_row_per_event_component(self):
+        rows = [
+            {
+                "event_id": "E1",
+                "component": "Z",
+                "total_traces": 10,
+                "accepted_traces": 6,
+                "failed_any_threshold": 4,
+                "failed_correlation_threshold": 3,
+                "failed_noise_ratio_threshold": 2,
+                "correlation_threshold_min": 0.6,
+                "noise_ratio_threshold_min": 10.0,
+            },
+            {
+                "event_id": "E1",
+                "component": "R",
+                "total_traces": 9,
+                "accepted_traces": 7,
+                "failed_any_threshold": 2,
+                "failed_correlation_threshold": 1,
+                "failed_noise_ratio_threshold": 1,
+                "correlation_threshold_min": 0.6,
+                "noise_ratio_threshold_min": 10.0,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            out_file = self.mod.write_screening_failure_counts(rows, Path(tmp))
+            written = pd.read_excel(
+                out_file,
+                sheet_name="Screening counts",
+                dtype={"event_id": str},
+            )
+
+        self.assertEqual(out_file.name, "screening_failure_counts.xlsx")
+        self.assertEqual(len(written), 2)
+        self.assertEqual(written.iloc[0]["event_id"], "E1")
+        self.assertEqual(written.iloc[0]["failed_correlation_threshold"], 3)
+        self.assertEqual(written.iloc[0]["failed_noise_ratio_threshold"], 2)
+
+    def test_event_has_zero_catalog_skip_accepts_only_numeric_zero(self):
+        catalog = pd.DataFrame(
+            {
+                "evid": ["ZERO_INT", "ZERO_FLOAT", "ZERO_TEXT", "ONE", "TWO", "BAD"],
+                "skip": [0, 0.0, "0", 1, 2, "not-a-number"],
+            }
+        )
+        with patch.object(self.mod, "catalog_local", catalog):
+            for event_id in ("ZERO_INT", "ZERO_FLOAT", "ZERO_TEXT"):
+                with self.subTest(event_id=event_id):
+                    self.assertTrue(self.mod.event_has_zero_catalog_skip(event_id))
+            for event_id in ("ONE", "TWO", "BAD", "MISSING"):
+                with self.subTest(event_id=event_id):
+                    self.assertFalse(self.mod.event_has_zero_catalog_skip(event_id))
 
     def test_apply_event_location_override_uses_configured_values(self):
         with patch.object(self.mod, "use_json_event_location", True), patch.object(
@@ -568,7 +642,7 @@ class AlignStackSmokeTests(unittest.TestCase):
 
             self.assertIsNotNone(out)
             self.assertEqual(out.parent.name, "Statics")
-            self.assertEqual(out.parent.parent.name, "output")
+            self.assertEqual(out.parent.parent.name, "stack_output")
             self.assertEqual(out.name, "EV1_R_S_3-10Hz_shiftR_xcorr_statics.xlsx")
             self.assertEqual(out.suffix, ".xlsx")
             df = pd.read_excel(out)

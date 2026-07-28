@@ -183,6 +183,9 @@ def build_alignment_products_payload(
     selected_ids: set,
     station_corr: dict,
     n_pass_window: int,
+    n_rejected_correlation: int,
+    n_rejected_trace_peak_to_pre_p: int,
+    n_rejected_any: int,
     pass_window_ids: set,
     snippet_by_station: dict,
     ref_window: np.ndarray,
@@ -207,6 +210,9 @@ def build_alignment_products_payload(
         "selected_ids": selected_ids,
         "station_corr": station_corr,
         "n_pass_window": n_pass_window,
+        "n_rejected_correlation": n_rejected_correlation,
+        "n_rejected_trace_peak_to_pre_p": n_rejected_trace_peak_to_pre_p,
+        "n_rejected_any": n_rejected_any,
         "pass_window_ids": pass_window_ids,
         "snippet_by_station": snippet_by_station,
         "ref_window": ref_window,
@@ -245,7 +251,7 @@ def write_component_stack_mseeds(
 
 def make_event_output_dir(base_prefix: str, eve_id: str) -> Path:
     """Create and return output directory for one event."""
-    save_path = Path(base_prefix + "output")
+    save_path = Path(base_prefix) / "stack_output"
     save_dir = save_path / eve_id
     save_dir.mkdir(parents=True, exist_ok=True)
     return save_dir
@@ -684,6 +690,33 @@ def normalize_traces_in_window(st_comp, win_start: int, win_end: int) -> None:
             tr.data = tr.data / mx
 
 
+def trace_peak_to_pre_p_median_abs_ratio(
+    values: np.ndarray,
+    p_arrival_seconds: float | None,
+    start_time: float,
+    sample_rate: float,
+) -> float | None:
+    """Return whole-trace peak divided by median absolute pre-P amplitude."""
+    if p_arrival_seconds is None:
+        return None
+    p_sample = int(np.floor((p_arrival_seconds - start_time) * sample_rate))
+    if p_sample <= 0:
+        return None
+    pre_p = np.abs(np.asarray(values[:p_sample], dtype=float))
+    pre_p = pre_p[np.isfinite(pre_p)]
+    if pre_p.size == 0:
+        return None
+    all_samples = np.abs(np.asarray(values, dtype=float))
+    all_samples = all_samples[np.isfinite(all_samples)]
+    if all_samples.size == 0:
+        return None
+    peak = float(np.max(all_samples))
+    median = float(np.median(pre_p))
+    if median == 0.0:
+        return float("inf") if peak > 0.0 else 1.0
+    return peak / median
+
+
 def compute_stage1_aligned_stack(
     st_comp,
     ref: np.ndarray,
@@ -752,6 +785,9 @@ def compute_stage2_screened_stack(
     imposed_station_shifts: dict[str, float] | None,
     measure_station_residuals: bool,
     r_window_min: float,
+    p_arrival_seconds_by_station: dict[str, float],
+    trace_peak_to_pre_p_median_min: float | None,
+    start_time: float,
     timing_state: TimingState,
 ):
     """Stage 2: align to Stage-1 stack, score window correlation, and keep passing traces."""
@@ -759,6 +795,8 @@ def compute_stage2_screened_stack(
     selected_ids = set()
     station_corr = {}
     n_pass_window = 0
+    n_rejected_correlation = 0
+    n_rejected_trace_peak_to_pre_p = 0
     pass_window_ids = set()
     snippet_by_station = {}
     ref_window = aligned_stack[win_start:win_end]
@@ -817,11 +855,35 @@ def compute_stage2_screened_stack(
 
         station_corr[station_id] = r_window
 
-        if r_window >= r_window_min:
+        trace_peak_to_pre_p_ratio = trace_peak_to_pre_p_median_abs_ratio(
+            d,
+            p_arrival_seconds_by_station.get(station_id),
+            start_time,
+            sample_rate,
+        )
+        passes_trace_amplitude = (
+            trace_peak_to_pre_p_median_min is None
+            or trace_peak_to_pre_p_ratio is None
+            or trace_peak_to_pre_p_ratio >= trace_peak_to_pre_p_median_min
+        )
+        passes_correlation = r_window >= r_window_min
+        if not passes_correlation:
+            n_rejected_correlation += 1
+        if not passes_trace_amplitude:
+            n_rejected_trace_peak_to_pre_p += 1
+
+        if passes_correlation and passes_trace_amplitude:
             selected_aligned_stack += aligned_data
             selected_ids.add(station_id)
         else:
-            print(f"    Rejected {station_id}: r_win={r_window:.2f}")
+            rejection_reason = f"r_win={r_window:.2f}"
+            if not passes_trace_amplitude:
+                rejection_reason += (
+                    "; trace peak/pre-P median="
+                    f"{trace_peak_to_pre_p_ratio:.2f} < "
+                    f"{trace_peak_to_pre_p_median_min:.2f}"
+                )
+            print(f"    Rejected {station_id}: {rejection_reason}")
     add_stage_timing(timing_state, "align_stage2_screen", _stage2_wall_start, _stage2_cpu_start)
 
     win = selected_aligned_stack[win_start:win_end]
@@ -829,11 +891,22 @@ def compute_stage2_screened_stack(
     if mx > 0:
         selected_aligned_stack = selected_aligned_stack / mx
 
+    n_rejected_any = len(st_comp) - len(selected_ids)
+    print(
+        "    Trace selection: "
+        f"accepted={len(selected_ids)}, rejected_any={n_rejected_any}, "
+        f"correlation_rejected={n_rejected_correlation}, "
+        f"trace_peak_pre-P_median_rejected={n_rejected_trace_peak_to_pre_p}"
+    )
+
     return {
         "selected_aligned_stack": selected_aligned_stack,
         "selected_ids": selected_ids,
         "station_corr": station_corr,
         "n_pass_window": n_pass_window,
+        "n_rejected_correlation": n_rejected_correlation,
+        "n_rejected_trace_peak_to_pre_p": n_rejected_trace_peak_to_pre_p,
+        "n_rejected_any": n_rejected_any,
         "pass_window_ids": pass_window_ids,
         "snippet_by_station": snippet_by_station,
         "ref_window": ref_window,

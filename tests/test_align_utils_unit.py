@@ -51,6 +51,64 @@ class AlignUtilsUnitTests(unittest.TestCase):
         self.assertTrue(state.timing_reported)
         mock_stage.assert_called_once_with(state)
 
+    def test_trace_peak_to_pre_p_median_ratio_uses_full_trace_peak(self):
+        ratio = align_utils.trace_peak_to_pre_p_median_abs_ratio(
+            np.array([1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 100.0]),
+            p_arrival_seconds=0.4,
+            start_time=-0.2,
+            sample_rate=10.0,
+        )
+
+        self.assertEqual(ratio, 100.0)
+
+    def test_trace_peak_to_pre_p_median_ratio_handles_zero_median_and_missing_arrival(self):
+        self.assertEqual(
+            align_utils.trace_peak_to_pre_p_median_abs_ratio(
+                np.array([0.0, 0.0, 2.0]),
+                p_arrival_seconds=0.3,
+                start_time=0.0,
+                sample_rate=10.0,
+            ),
+            float("inf"),
+        )
+        self.assertIsNone(
+            align_utils.trace_peak_to_pre_p_median_abs_ratio(
+                np.array([1.0, 2.0]),
+                p_arrival_seconds=None,
+                start_time=0.0,
+                sample_rate=10.0,
+            )
+        )
+
+    def test_stage2_reports_separate_correlation_and_ratio_rejections(self):
+        traces = [
+            self._trace("ratio", [1.0, 1.0, 2.0, 2.0]),
+            self._trace("correlation", [-1.0, -1.0, -20.0, -20.0]),
+            self._trace("accepted", [1.0, 1.0, 20.0, 20.0]),
+        ]
+        products = align_utils.compute_stage2_screened_stack(
+            st_comp=traces,
+            aligned_stack=np.ones(4),
+            npts=4,
+            sample_rate=1.0,
+            win_start=0,
+            win_end=4,
+            move_limit_samples=0,
+            calc_shifts={},
+            imposed_station_shifts=None,
+            measure_station_residuals=False,
+            r_window_min=0.6,
+            p_arrival_seconds_by_station={station: 2.0 for station in ("ratio", "correlation", "accepted")},
+            trace_peak_to_pre_p_median_min=10.0,
+            start_time=0.0,
+            timing_state=align_utils.TimingState(),
+        )
+
+        self.assertEqual(products["n_rejected_correlation"], 1)
+        self.assertEqual(products["n_rejected_trace_peak_to_pre_p"], 1)
+        self.assertEqual(products["n_rejected_any"], 2)
+        self.assertEqual(products["selected_ids"], {"accepted"})
+
     def test_build_alignment_products_payload_contains_expected_keys(self):
         payload = align_utils.build_alignment_products_payload(
             npts=100,
@@ -64,6 +122,9 @@ class AlignUtilsUnitTests(unittest.TestCase):
             selected_ids={"1"},
             station_corr={"1": 0.9},
             n_pass_window=1,
+            n_rejected_correlation=2,
+            n_rejected_trace_peak_to_pre_p=3,
+            n_rejected_any=4,
             pass_window_ids={"1"},
             snippet_by_station={"1": np.array([1.0])},
             ref_window=np.array([1.0, 1.0]),
@@ -80,6 +141,9 @@ class AlignUtilsUnitTests(unittest.TestCase):
             self.assertIn(key, payload)
         self.assertEqual(payload["npts"], 100)
         self.assertEqual(payload["sample_rate"], 20.0)
+        self.assertEqual(payload["n_rejected_correlation"], 2)
+        self.assertEqual(payload["n_rejected_trace_peak_to_pre_p"], 3)
+        self.assertEqual(payload["n_rejected_any"], 4)
 
     def test_build_component_output_payload_copies_arrays(self):
         selected_trace = np.array([1.0, 2.0])
