@@ -20,8 +20,18 @@ history and interpretation belong in the other files under `Notes/`.
 ## Now
 
 - [ ] **FS-003 — check that static shifts**
-  - Purpose: check that static shifts are coded correctly.
-  - Approach: compare a representative event with correlation shift and static shift. Check waveforms and number of stations used.  Check other two components.  Check various frequencies.
+  - Purpose: Verify that event and station static shifts are coded and applied
+    correctly.
+  - Done when: Representative comparisons confirm the expected applied shifts,
+    station counts, and waveform behavior for Z/R/T across selected frequency
+    bands, with the evidence recorded.
+  - Related: `align_stack.py`, `align_utils.py`, `rp_input.json`,
+    `stack_output/Statics`
+  - Approach: Compare a representative event with correlation-derived and
+    tabulated shifts; inspect waveforms and the number of stations used, then
+    repeat for the other components and selected frequencies.
+  - Status: Validation pending; current implementation changes and historical
+    test checkpoints are not representative scientific validation.
   - Added: 2026-07-23
 
 - [ ] **FS-004 — check static shifts in station table**
@@ -31,11 +41,13 @@ history and interpretation belong in the other files under `Notes/`.
     been compared at representative frequencies, and changes in alignment,
     correlation, and stack coherence have been summarized.
   - Related: `align_stack.py`, `rp_input.json`,
-    `event_sta_info/stations.xlsx`, `output/Statics`
+    `event_sta_info/stations.xlsx`, `stack_output/Statics`
   - Approach: Hold the event set and all non-static parameters fixed, run each
     frequency band with `station_static_mode` set to `none`, `tabulated`, and
     `cross_correlation`, and compare the same plots and quantitative quality
     measures.
+  - Status: Validation pending; the active pending configuration is one
+    `tabulated` 1--4 Hz case and is not a matched comparison.
   - Added: 2026-07-23
 
 - [ ] **FS-005 — add P shifts to station file**
@@ -50,6 +62,8 @@ history and interpretation belong in the other files under `Notes/`.
   - Approach: Inspect candidate-event vertical traces, run P alignment for the
     best events, reject unstable station estimates, calculate robust station
     values, and merge them into a new workbook column.
+  - Status: Not started; no P-static column or validation evidence was
+    reviewed in the current repository state.
   - Added: 2026-07-23
 
 ## Next
