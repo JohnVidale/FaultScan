@@ -202,7 +202,7 @@ The shared waveform reader excludes these stations before reading, rotation, ali
 
 ## 2026-07-22 Chat Addendum: Repository Status, HTML Provenance, and Plot Products
 
-### Scope
+### Repository Status Overview
 
 - This was a repository-inspection and project-memory update chat. Apart from this notes update, it made no code changes, configuration changes, output files, or plots.
 - The chat clarified what Git could and could not say about recent changes, and distinguished tracked committed work from untracked local artifacts.
@@ -273,7 +273,7 @@ The shared waveform reader excludes these stations before reading, rotation, ali
 
 ## 2026-07-26 Chat Addendum: Archiving and Per-Chat Memory Capture
 
-### Scope and Decisions
+### Scope and Workflow
 
 - This was a project-memory workflow discussion. Apart from this notes update, it made no code changes, configuration changes, output files, or plots.
 - Archiving a chat preserves it in the account so it can be searched, reopened, continued, or unarchived, but removes it from normal sidebar view and from automatic chat-history reference in other chats. Any separately saved memory remains, and information already copied into project files remains available independently of the archived conversation.
@@ -600,3 +600,29 @@ The shared waveform reader excludes these stations before reading, rotation, ali
   validation criteria are met. In particular, evaluate station-static modes
   with matched runs and do not treat the current 1--4 Hz tabulated
   configuration as a scientific conclusion.
+
+## 2026-07-28 Chat Addendum: Daily-Log Reconciliation
+
+### Confirmed Repository State
+
+- The July 27 daily-log automation reconciled the preceding pending-worktree
+  description with six confirmed commits on `main`: `23db1d3` (daily log and
+  chat summary), `73238a0` (FS-003--FS-005 validation criteria), `21f6a1b`
+  (screening metrics with alignment/configuration/test changes), `5764f99`
+  (event R/T snippet plotting and tests), `4499403` (shared stack-comparison
+  output handling and tests), and `12f2adc` (shared stack-output workflow
+  documentation).
+- At that review, local `main` and `origin/main` both pointed to `12f2adc`;
+  the previously described source, configuration, test, task-queue, and
+  documentation changes were committed. Local `.DS_Store` metadata was the
+  only uncommitted file observed.
+
+### Verification and Interpretation
+
+- The automation ran no tests and no scientific processing, and it reviewed no
+  new scientific outputs. The commits and their test changes are therefore
+  implementation evidence only, not scientific validation or completion of
+  FS-003, FS-004, or FS-005.
+- The automation updated `Notes/daily/2026-07-27.md` and its local continuity
+  memory only; it made no program, configuration, research-input, or output
+  changes.
