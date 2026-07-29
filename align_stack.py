@@ -1307,7 +1307,6 @@ def plot_three_component_stack_compare(
 def plot_individual_seismograms_three_components(
     show_individual_seismograms: bool,
     all_component_data: dict,
-    pass_window_ids: set,
     start_time: float,
     eve_id: str,
     align_phase_name: str,
@@ -1323,6 +1322,7 @@ def plot_individual_seismograms_three_components(
 
             data = all_component_data[comp_name]
             all_rows = data.get("all_rows", [])
+            selected_ids = set(data.get("selected_ids", []))
             all_rows = sorted(all_rows, key=lambda t: int(t[1]))
             t_abs = data["t_abs"]
             mask = data["mask"]
@@ -1389,8 +1389,7 @@ def plot_individual_seismograms_three_components(
                     for idx_in_subset, row in enumerate(subset):
                         _, station_id, y = row[:3]
                         i = (len(subset) - 1) - idx_in_subset
-                        passed_win = station_id in pass_window_ids
-                        trace_color = "k" if passed_win else "red"
+                        trace_color = "k" if station_id in selected_ids else "red"
                         axp.plot(
                             t_abs[plot_mask],
                             y[plot_mask] + i,
@@ -1958,7 +1957,6 @@ def plot_three_component_summary_products(
     save_dir: Path,
     origin_env,
     catalog_df,
-    pass_window_ids: set,
 ) -> None:
     """Generate and save all downstream three-component product plots."""
     plot_three_component_log_envelope(
@@ -1986,7 +1984,6 @@ def plot_three_component_summary_products(
     plot_individual_seismograms_three_components(
         show_individual_seismograms=show_individual_seismograms,
         all_component_data=all_component_data,
-        pass_window_ids=pass_window_ids,
         start_time=start_time,
         eve_id=eve_id,
         align_phase_name=align_phase_name,
@@ -3088,7 +3085,6 @@ def run_pipeline() -> None:
         # Reset per-event caches/payloads so each event gets its own 3-comp products.
         all_component_data = {}
         horizontal_window_cache, horizontal_raw_limits_cache = {}, {}
-        pass_window_ids_for_event: set = set()
 
         for idx, channel in enumerate(channels):
             sel_comp = sel_comp_list[idx]
@@ -3208,7 +3204,6 @@ def run_pipeline() -> None:
                         ),
                     }
                 )
-            pass_window_ids_for_event = pass_window_ids
             component_stacks_by_name.setdefault(plot_comp, []).append(
                 (
                     eve_id,
@@ -3414,7 +3409,6 @@ def run_pipeline() -> None:
                 save_dir=save_dir,
                 origin_env=origin_env,
                 catalog_df=catalog_local,
-                pass_window_ids=pass_window_ids_for_event,
             )
 
             finalize_three_component_plotting(_plot3_wall_start, _plot3_cpu_start)

@@ -285,6 +285,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
             comp_key = kwargs["sel_comp"] if kwargs["channel"] != "DPZ" else "DPZ"
             kwargs["all_component_data"][comp_key] = {"ok": True}
 
+        input_align_phase = self.mod.align_phase
         with patch.object(self.mod, "events", ["E1"]), patch.object(self.mod, "all_channels", True), patch.object(
             self.mod,
             "get_component_selection",
@@ -367,7 +368,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
         self.assertEqual(mock_record.call_count, 3)
         for rec_call in mock_record.call_args_list:
             self.assertEqual(rec_call.kwargs["eve_id"], "E1")
-            self.assertEqual(rec_call.kwargs["align_phase_name"], self.mod.align_phase)
+            self.assertEqual(rec_call.kwargs["align_phase_name"], input_align_phase)
             self.assertEqual(rec_call.kwargs["save_dir"], self.temp_dir.name)
         mock_plot_stage.assert_not_called()
         mock_setup.assert_called_once()
@@ -378,6 +379,7 @@ class AlignStackPipelineSmokeTests(unittest.TestCase):
 
         mock_summary.assert_called_once()
         self.assertEqual(mock_summary.call_args.kwargs["eve_id"], "E1")
+        self.assertNotIn("pass_window_ids", mock_summary.call_args.kwargs)
         self.assertEqual(mock_summary.call_args.kwargs["align_phase_name"], self.mod.align_phase)
         self.assertEqual(mock_summary.call_args.kwargs["save_dir"], self.temp_dir.name)
         self.assertEqual(mock_summary.call_args.kwargs["comp_order"], ["DPZ", "R", "T"])

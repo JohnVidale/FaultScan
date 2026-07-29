@@ -30,8 +30,9 @@ history and interpretation belong in the other files under `Notes/`.
   - Approach: Compare a representative event with correlation-derived and
     tabulated shifts; inspect waveforms and the number of stations used, then
     repeat for the other components and selected frequencies.
-  - Status: Validation pending; current implementation changes and historical
-    test checkpoints are not representative scientific validation.
+  - Status: Validation pending. Three-component diagnostic plots now color
+    each component from its own final screening selection, but representative
+    waveform validation has not been run.
   - Added: 2026-07-23
 
 - [ ] **FS-004 — check static shifts in station table**
