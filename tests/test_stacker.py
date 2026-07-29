@@ -89,6 +89,18 @@ class StackerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "snapshots disagree"):
                 stacker.load_run_parameters(run_dir)
 
+    def test_load_active_bandpass_config_reads_rp_input(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config_file = Path(temporary) / "rp_input.json"
+            config_file.write_text(
+                '{"min_freq": 2.0, "max_freq": 8.0}',
+                encoding="utf-8",
+            )
+
+            bandpass = stacker.load_active_bandpass_config(config_file)
+
+        self.assertEqual(bandpass, (2.0, 8.0))
+
     def test_write_plots_builds_all_requested_figures_before_showing(self):
         call_order = []
         row_figures = [

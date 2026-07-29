@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import matplotlib.figure
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -14,6 +15,7 @@ from obspy import Trace, UTCDateTime, read
 
 
 STACK_OUTPUT_DIR = Path("/Users/jvidale/Documents/Research/FaultScanR/stack_output")
+RP_INPUT_FILE = Path(__file__).resolve().with_name("rp_input.json")
 CATALOG_FILE = Path(
     "/Users/jvidale/Documents/Research/FaultScanR/event_sta_info/catalog_local_hand.xlsx"
 )
@@ -40,7 +42,7 @@ DEFAULT_MASK_OTHER_EVENTS = "smaller"
 DEFAULT_OVERLAY_ONLY = False
 DEFAULT_SHOW_PLOTS = True
 DEFAULT_SAVE_PLOTS = True
-DEFAULT_AMPLITUDE_LIMITS = (-0.1, 0.1)
+DEFAULT_AMPLITUDE_LIMITS = (-0.4, 0.4)
 
 
 @dataclass
@@ -115,6 +117,20 @@ def load_run_parameters(run_dir: Path) -> dict:
     return first
 
 
+def load_active_bandpass_config(config_file: Path = RP_INPUT_FILE) -> tuple[float, float]:
+    """Load the active bandpass limits from rp_input.json."""
+    with config_file.open("r", encoding="utf-8") as handle:
+        config = json.load(handle)
+    try:
+        min_freq = float(config["min_freq"])
+        max_freq = float(config["max_freq"])
+    except KeyError as exc:
+        raise ValueError(f"{config_file} is missing bandpass field {exc.args[0]!r}") from exc
+    if min_freq <= 0.0 or max_freq <= min_freq:
+        raise ValueError("Bandpass must satisfy 0 < min_freq < max_freq")
+    return min_freq, max_freq
+
+
 def _magnitude_column(catalog: pd.DataFrame) -> str | None:
     for column in ("magnitude", "mag"):
         if column in catalog.columns:
@@ -155,8 +171,8 @@ def load_event_stacks(
         magnitude = None
         if magnitude_column is not None:
             try:
-                magnitude = float(row[magnitude_column])
-            except (TypeError, ValueError):
+                magnitude = float(row[magnitude_column].item())
+            except (TypeError, ValueError, AttributeError):
                 pass
         if magnitude is not None and magnitude <= MAG_MIN:
             continue
@@ -357,7 +373,7 @@ def _plot_component_rows(
     title: str,
     output_path: Path | None,
     amplitude_limits: tuple[float, float] | None = None,
-) -> plt.Figure:
+) -> matplotlib.figure.Figure:
     fig, axes = plt.subplots(
         len(components),
         1,
@@ -407,7 +423,7 @@ def _plot_component_medians(
     title: str,
     output_path: Path | None,
     amplitude_limits: tuple[float, float] | None = None,
-) -> plt.Figure:
+) -> matplotlib.figure.Figure:
     fig, axes = plt.subplots(
         len(components),
         1,
@@ -605,6 +621,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Using align_stack input/output directory: {run_dir}")
     print(f"Processing components: {' '.join(components)}")
     parameters = load_run_parameters(run_dir)
+    parameters["min_freq"], parameters["max_freq"] = load_active_bandpass_config()
     catalog = load_catalog(CATALOG_FILE)
     stacks_by_component = load_event_stacks(
         run_dir,

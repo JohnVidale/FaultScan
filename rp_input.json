@@ -10,19 +10,19 @@
 
   "r_window_min":   0.2,
   "move_limit_sec": 0.05,
-  "trace_peak_to_pre_p_median_min": 20.0,
+  "trace_peak_to_pre_p_median_min": 5.0,
 
   "analysis_hz": 250,
 
   "all_channels": true,
   "component": "T",
-  "align_phase": "S",
+  "align_phase": "P",
   "input_mode": "snippets",
 
   "event_alignment_reference": "CI_40353472",
   "event_stack_alignment_max_shift_sec": 0.2,
-  "use_event_static_correction": true,
-  "station_static_mode": "tabulated",
+  "use_event_static_correction": false,
+  "station_static_mode": "none",
   "station_static_file": "/Users/jvidale/Documents/Research/FaultScanR/event_sta_info/stations.xlsx",
   "station_static_column": "station static s",
   "use_json_event_location": true,

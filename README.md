@@ -167,15 +167,20 @@ conda run -n vidale_main python plot_event_rt_snippets.py \
   --event CI_40353864
 ```
 
-The Z, R, and T traces for each station are shifted so their TauP-predicted S
-pick is at 0 s and is marked in green; Z is gray. Each station's configured
+The Z, R, and T traces for each station are shifted so their TauP-predicted
+`align_phase` pick is at 0 s and is marked in green; Z is gray. Each station's configured
 static from `stations.xlsx` is marked and labeled in purple. Edit `START_TIME`
 and `END_TIME` near the top of `plot_event_rt_snippets.py` to change the
-S-relative display window; `MIN_FREQ` and `MAX_FREQ` control the default
-3–10 Hz bandpass. Corresponding command-line options override these defaults.
-The plot also reads `win_pre`, `win_post`, and `move_limit_sec` from
-`rp_input.json` and marks the correlation window and its expanded shift-search
-limits. `APPLY_STATION_STATICS_R`, `APPLY_STATION_STATICS_T`, and
+phase-relative display window. The plotter reads `align_phase`, its default bandpass, and
+`win_pre`, `win_post`, and `move_limit_sec` from `rp_input.json`; explicit
+`--min-freq` and `--max-freq` options override the configured bandpass. It
+marks the correlation window and its expanded shift-search limits.
+Each trace is normalized by its peak amplitude inside that correlation window;
+use `--display-amplitude` to adjust the vertical display scale.
+Use `--normalize-to-largest-component` to normalize all displayed components
+for each station by that station's largest correlation-window peak instead,
+preserving relative component amplitudes.
+`APPLY_STATION_STATICS_R`, `APPLY_STATION_STATICS_T`, and
 `APPLY_STATION_STATICS_Z` independently control whether each component is
 shifted left by its value from `stations.xlsx`. The corresponding command-line
 controls are `--shift-r`, `--shift-t`, and `--shift-z`, with `--no-shift-r`,
@@ -196,6 +201,8 @@ conda run -n vidale_main python stacker.py \
 Running `stacker.py` with the VS Code triangle and no arguments uses the
 editable `DEFAULT_*` settings near the top of the file. Command-line options
 override those settings when supplied.
+Its plot labels use the active bandpass from `rp_input.json`; it does not
+refilter the stacks written by `align_stack.py`.
 
 Preview a catalog shift update before modifying the workbook:
 

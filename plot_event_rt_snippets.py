@@ -27,53 +27,84 @@ from align_utils import (
 PATH_PREFIX = Path("/Users/jvidale/Documents/Research/FaultScanR")
 RP_INPUT_FILE = Path(__file__).resolve().with_name("rp_input.json")
 DEFAULT_EVENT = "CI_40353864"
-START_TIME = -3.0  # Seconds relative to each station's TauP-predicted S arrival.
+START_TIME = -3.0  # Seconds relative to each station's TauP-predicted phase arrival.
 END_TIME = 7.0
-MIN_FREQ = 1.0
-MAX_FREQ = 4.0
-APPLY_STATION_STATICS_R = True
-APPLY_STATION_STATICS_T = True
+APPLY_STATION_STATICS_R = False
+APPLY_STATION_STATICS_T = False
 APPLY_STATION_STATICS_Z = False
-USE_Z_COMPONENT = False
-COMMON_S_PICK_TIME = 0.0
-DISPLAY_AMPLITUDE = 1.0  # 20% larger peak-to-peak display than the prior 0.38 scale.
+USE_Z_COMPONENT = True
+COMMON_PHASE_PICK_TIME = 0.0
+DEFAULT_DISPLAY_AMPLITUDE = 0.3
+NORMALIZE_TO_LARGEST_COMPONENT = True
 
 
-def common_trace_peak(trace_pairs: list[tuple]) -> float:
-    """Return one peak amplitude shared by all Z, R, and T traces in the event."""
-    peaks = [
-        float(np.max(np.abs(np.asarray(trace.data, dtype=float))))
-        for radial, transverse, vertical, _s_arrival in trace_pairs
-        for trace in (radial, transverse, vertical)
-        if trace is not None and trace.stats.npts > 0
-    ]
-    return max(peaks, default=0.0)
+def correlation_window_peak(
+    trace,
+    phase_relative_time: np.ndarray,
+    win_pre: float,
+    win_post: float,
+) -> float:
+    """Return a trace's finite peak absolute amplitude in the correlation window."""
+    data = np.asarray(trace.data, dtype=float)
+    in_window = (
+        (phase_relative_time >= COMMON_PHASE_PICK_TIME - win_pre)
+        & (phase_relative_time <= COMMON_PHASE_PICK_TIME + win_post)
+        & np.isfinite(data)
+    )
+    if not np.any(in_window):
+        return 0.0
+    return float(np.max(np.abs(data[in_window])))
 
 
-def predicted_s_arrival_seconds(model: TauPyModel, event_depth: float, distance_deg: float) -> float | None:
-    """Return the first direct S-arrival time for one station."""
+def normalize_to_correlation_window_peak(
+    trace,
+    phase_relative_time: np.ndarray,
+    win_pre: float,
+    win_post: float,
+    normalization_peak: float | None = None,
+) -> np.ndarray:
+    """Normalize a trace by its own or an explicitly shared window peak."""
+    data = np.asarray(trace.data, dtype=float)
+    peak = (
+        correlation_window_peak(trace, phase_relative_time, win_pre, win_post)
+        if normalization_peak is None
+        else normalization_peak
+    )
+    return data / peak if peak > 0.0 else np.zeros_like(data)
+
+
+def predicted_phase_arrival_seconds(
+    model: TauPyModel,
+    event_depth: float,
+    distance_deg: float,
+    phase: str,
+) -> float | None:
+    """Return the first direct configured-phase arrival time for one station."""
+    phase = phase.upper()
+    if phase not in {"P", "S"}:
+        raise ValueError(f"Unsupported alignment phase {phase!r}; choose P or S")
     arrivals = model.get_travel_times(
         source_depth_in_km=event_depth,
         distance_in_degree=distance_deg,
-        phase_list=["S", "s"],
+        phase_list=[phase, phase.lower()],
     )
     for arrival in arrivals:
-        if arrival.name.upper() == "S":
+        if arrival.name.upper() == phase:
             return float(arrival.time)
     return None
 
 
-def trace_times_relative_to_predicted_s(
+def trace_times_relative_to_predicted_phase(
     trace,
     origin,
-    s_arrival: float,
+    phase_arrival: float,
     station_static: float = 0.0,
 ) -> np.ndarray:
-    """Return S-relative times after applying the station-static correction."""
+    """Return phase-relative times after applying the station-static correction."""
     return (
         np.asarray(trace.times(reftime=origin), dtype=float)
-        - float(s_arrival)
-        + COMMON_S_PICK_TIME
+        - float(phase_arrival)
+        + COMMON_PHASE_PICK_TIME
         - float(station_static)
     )
 
@@ -98,6 +129,29 @@ def load_correlation_window_config(config_file: Path) -> tuple[float, float, flo
             "win_pre, win_post, and move_limit_sec must be nonnegative"
         )
     return win_pre, win_post, move_limit_sec
+
+
+def load_bandpass_config(config_file: Path) -> tuple[float, float]:
+    """Load the active bandpass limits from rp_input.json."""
+    with config_file.open("r", encoding="utf-8") as handle:
+        config = json.load(handle)
+    required = ("min_freq", "max_freq")
+    missing = [key for key in required if key not in config]
+    if missing:
+        raise ValueError(f"{config_file} is missing bandpass fields: {missing}")
+    min_freq, max_freq = float(config["min_freq"]), float(config["max_freq"])
+    if min_freq <= 0.0 or max_freq <= min_freq:
+        raise ValueError("Bandpass must satisfy 0 < min_freq < max_freq")
+    return min_freq, max_freq
+
+
+def load_align_phase_config(config_file: Path) -> str:
+    """Load the active P or S alignment phase from rp_input.json."""
+    with config_file.open("r", encoding="utf-8") as handle:
+        phase = str(json.load(handle).get("align_phase", "S")).upper()
+    if phase not in {"P", "S"}:
+        raise ValueError(f"align_phase must be P or S; got {phase!r}")
+    return phase
 
 
 def load_station_static_settings(config_file: Path) -> tuple[Path, str]:
@@ -153,9 +207,9 @@ def correlation_window_bounds(
     win_post: float,
     move_limit_sec: float,
 ) -> tuple[float, float, float, float]:
-    """Return correlation edges and expanded lag-search edges on the S-relative axis."""
-    window_start = COMMON_S_PICK_TIME - win_pre
-    window_end = COMMON_S_PICK_TIME + win_post
+    """Return correlation and lag-search bounds on the phase-relative axis."""
+    window_start = COMMON_PHASE_PICK_TIME - win_pre
+    window_end = COMMON_PHASE_PICK_TIME + win_post
     return (
         window_start,
         window_end,
@@ -171,32 +225,34 @@ def collect_rt_traces(
     start_time: float,
     end_time: float,
     sampling_hz: int,
+    align_phase: str,
     include_z: bool = True,
 ):
-    """Read enough data for the S-relative window and return matched component traces."""
+    """Read enough data for the phase-relative window and matched component traces."""
     event_depth, event_lat, event_lon, origin = load_event_metadata(event_id, info_root)
     stations = load_station_lookup(info_root)
     model = TauPyModel(model="iasp91")
-    s_arrival_by_station = {}
+    phase_arrival_by_station = {}
     for station_id, (station_lat, station_lon) in stations.items():
-        distance_deg = locations2degrees(
+        distance_deg = float(locations2degrees(
             event_lat,
             event_lon,
             station_lat,
             station_lon,
-        )
-        s_arrival = predicted_s_arrival_seconds(
+        ))
+        phase_arrival = predicted_phase_arrival_seconds(
             model,
             event_depth,
             distance_deg,
+            align_phase,
         )
-        if s_arrival is not None:
-            s_arrival_by_station[str(station_id)] = s_arrival
-    if not s_arrival_by_station:
-        raise RuntimeError(f"No TauP S arrivals found for {event_id}")
+        if phase_arrival is not None:
+            phase_arrival_by_station[str(station_id)] = phase_arrival
+    if not phase_arrival_by_station:
+        raise RuntimeError(f"No TauP {align_phase} arrivals found for {event_id}")
 
-    input_start_time = min(s_arrival_by_station.values()) + start_time - COMMON_S_PICK_TIME
-    input_end_time = max(s_arrival_by_station.values()) + end_time - COMMON_S_PICK_TIME
+    input_start_time = min(phase_arrival_by_station.values()) + start_time - COMMON_PHASE_PICK_TIME
+    input_end_time = max(phase_arrival_by_station.values()) + end_time - COMMON_PHASE_PICK_TIME
     timing = TimingState()
     horizontal_stream, _raw_limits = read_waveforms_for_event(
         eve_id=event_id,
@@ -260,7 +316,7 @@ def collect_rt_traces(
                 if include_z
                 else None
             ),
-            s_arrival_by_station[str(trace.stats.station)],
+            phase_arrival_by_station[str(trace.stats.station)],
         )
         for trace in radial
         if (
@@ -269,7 +325,7 @@ def collect_rt_traces(
                 not include_z
                 or str(trace.stats.station) in vertical_by_station
             )
-            and str(trace.stats.station) in s_arrival_by_station
+            and str(trace.stats.station) in phase_arrival_by_station
         )
     ]
     pairs.sort(key=lambda pair: float(pair[0].stats.dist_km))
@@ -288,13 +344,16 @@ def plot_rt_frames(
     max_freq: float,
     traces_per_frame: int,
     output_dir: Path,
+    align_phase: str,
+    display_amplitude: float,
     win_pre: float,
     win_post: float,
     move_limit_sec: float,
     station_statics: dict[str, float] | None,
     static_components: frozenset[str] | set[str] | None = None,
+    normalize_to_largest_component: bool = False,
 ) -> list[Path]:
-    """Save TauP-S-aligned Z/R/T overlays, with one station group per row."""
+    """Save TauP-phase-aligned Z/R/T overlays, with one station group per row."""
     if station_statics is None:
         active_static_components = frozenset()
     elif static_components is None:
@@ -309,15 +368,12 @@ def plot_rt_frames(
         )
     output_dir.mkdir(parents=True, exist_ok=True)
     output_files: list[Path] = []
-    amplitude_peak = common_trace_peak(trace_pairs)
-    if amplitude_peak == 0.0:
-        raise ValueError("All Z/R/T traces have zero amplitude")
-    if active_static_components:
+    if active_static_components and station_statics is not None:
         station_ids = {
             str(radial.stats.station).zfill(5)
-            for radial, _transverse, _vertical, _s_arrival in trace_pairs
+            for radial, _transverse, _vertical, _phase_arrival in trace_pairs
         }
-        missing_statics = sorted(station_ids - set(station_statics))
+        missing_statics = sorted(station_ids - set(station_statics.keys()))
         if missing_statics:
             raise ValueError(
                 f"Station statics are missing for {len(missing_statics)} plotted "
@@ -359,58 +415,87 @@ def plot_rt_frames(
             linestyle=":",
         )
 
-        for row, (radial, transverse, vertical, s_arrival) in enumerate(subset):
+        for row, (radial, transverse, vertical, phase_arrival) in enumerate(subset):
             station_id = str(radial.stats.station).zfill(5)
             station_static = (
                 float(station_statics[station_id])
-                if active_static_components
+                if active_static_components and station_statics is not None
                 else 0.0
             )
-            r_time = trace_times_relative_to_predicted_s(
+            r_time = trace_times_relative_to_predicted_phase(
                 radial,
                 origin,
-                s_arrival,
+                phase_arrival,
                 station_static if "R" in active_static_components else 0.0,
             )
-            t_time = trace_times_relative_to_predicted_s(
+            t_time = trace_times_relative_to_predicted_phase(
                 transverse,
                 origin,
-                s_arrival,
+                phase_arrival,
                 station_static if "T" in active_static_components else 0.0,
             )
-            radial_data = np.asarray(radial.data, dtype=float) / amplitude_peak
-            transverse_data = np.asarray(transverse.data, dtype=float) / amplitude_peak
+            z_time = None
+            if vertical is not None:
+                z_time = trace_times_relative_to_predicted_phase(
+                    vertical,
+                    origin,
+                    phase_arrival,
+                    station_static if "Z" in active_static_components else 0.0,
+                )
+            shared_peak = None
+            if normalize_to_largest_component:
+                component_peaks = [
+                    correlation_window_peak(radial, r_time, win_pre, win_post),
+                    correlation_window_peak(transverse, t_time, win_pre, win_post),
+                ]
+                if vertical is not None and z_time is not None:
+                    component_peaks.append(
+                        correlation_window_peak(vertical, z_time, win_pre, win_post)
+                    )
+                shared_peak = max(component_peaks)
+            radial_data = normalize_to_correlation_window_peak(
+                radial,
+                r_time,
+                win_pre,
+                win_post,
+                shared_peak,
+            )
+            transverse_data = normalize_to_correlation_window_peak(
+                transverse,
+                t_time,
+                win_pre,
+                win_post,
+                shared_peak,
+            )
             ax.plot(
                 r_time,
-                DISPLAY_AMPLITUDE * radial_data + offsets[row],
+                display_amplitude * radial_data + offsets[row],
                 color="tab:blue",
                 lw=0.8,
             )
             ax.plot(
                 t_time,
-                DISPLAY_AMPLITUDE * transverse_data + offsets[row],
+                display_amplitude * transverse_data + offsets[row],
                 color="tab:orange",
                 lw=0.8,
             )
-            if vertical is not None:
-                z_time = trace_times_relative_to_predicted_s(
+            if vertical is not None and z_time is not None:
+                vertical_data = normalize_to_correlation_window_peak(
                     vertical,
-                    origin,
-                    s_arrival,
-                    station_static if "Z" in active_static_components else 0.0,
-                )
-                vertical_data = (
-                    np.asarray(vertical.data, dtype=float) / amplitude_peak
+                    z_time,
+                    win_pre,
+                    win_post,
+                    shared_peak,
                 )
                 ax.plot(
                     z_time,
-                    DISPLAY_AMPLITUDE * vertical_data + offsets[row],
+                    display_amplitude * vertical_data + offsets[row],
                     color="0.45",
                     lw=0.8,
                 )
-            if start_time <= COMMON_S_PICK_TIME <= end_time:
+            if start_time <= COMMON_PHASE_PICK_TIME <= end_time:
                 ax.vlines(
-                    COMMON_S_PICK_TIME,
+                    COMMON_PHASE_PICK_TIME,
                     offsets[row] - 0.38,
                     offsets[row] + 0.38,
                     color="tab:green",
@@ -444,22 +529,24 @@ def plot_rt_frames(
         ax.set_ylim(-0.65, len(subset) - 0.35)
         ax.set_yticks(offsets)
         ax.set_yticklabels([str(pair[0].stats.station).zfill(5) for pair in subset], fontsize=8)
-        ax.set_xlabel("Time relative to TauP-predicted S (s)")
+        ax.set_xlabel(f"Time relative to TauP-predicted {align_phase} (s)")
         ax.set_ylabel("Station (near to far)")
         has_z = any(pair[2] is not None for pair in subset)
         component_label = "Z/R/T" if has_z else "R/T"
         filename_component_label = "ZRT" if has_z else "RT"
         ax.set_title(
-            f"{event_id}: TauP-S-aligned {component_label} snippets, "
+            f"{event_id}: TauP-{align_phase}-aligned {component_label} snippets, "
             f"{min_freq:g}-{max_freq:g} Hz "
-            f"(stations {first + 1}-{first + len(subset)})",
+            f"({'largest-component' if normalize_to_largest_component else 'per-trace'} "
+            f"window-peak normalized; scale={display_amplitude:g}; "
+            f"stations {first + 1}-{first + len(subset)})",
             fontweight="bold",
         )
         ax.plot([], [], color="tab:blue", lw=1.4, label="R")
         ax.plot([], [], color="tab:orange", lw=1.4, label="T")
         if has_z:
             ax.plot([], [], color="0.45", lw=1.4, label="Z")
-        ax.plot([], [], color="tab:green", lw=1.4, label="Predicted S")
+        ax.plot([], [], color="tab:green", lw=1.4, label=f"Predicted {align_phase}")
         if active_static_components:
             shifted_component_label = "/".join(
                 component
@@ -482,7 +569,7 @@ def plot_rt_frames(
         fig.tight_layout()
 
         output_file = output_dir / (
-            f"{event_id}_{filename_component_label}_snippets_S_aligned_"
+            f"{event_id}_{filename_component_label}_snippets_{align_phase}_aligned_"
             f"{start_time:g}-{end_time:g}s_"
             f"{min_freq:g}-{max_freq:g}Hz_frame{frame_index:02d}.png"
         )
@@ -521,24 +608,62 @@ def resolve_station_static_components(
 def build_argument_parser() -> argparse.ArgumentParser:
     """Build command-line arguments for the standalone plotter."""
     parser = argparse.ArgumentParser(
-        description="Plot TauP-S-aligned overlaid Z/R/T event snippets in offset frames."
+        description="Plot TauP-aligned overlaid Z/R/T event snippets in offset frames."
     )
     parser.add_argument("--event", default=DEFAULT_EVENT)
     parser.add_argument(
         "--start-time",
         type=float,
         default=START_TIME,
-        help=f"Window start relative to predicted S (default: {START_TIME:g} s).",
+        help=f"Window start relative to the predicted phase (default: {START_TIME:g} s).",
     )
     parser.add_argument(
         "--end-time",
         type=float,
         default=END_TIME,
-        help=f"Window end relative to predicted S (default: {END_TIME:g} s).",
+        help=f"Window end relative to the predicted phase (default: {END_TIME:g} s).",
     )
-    parser.add_argument("--min-freq", type=float, default=MIN_FREQ)
-    parser.add_argument("--max-freq", type=float, default=MAX_FREQ)
+    parser.add_argument(
+        "--min-freq",
+        type=float,
+        default=None,
+        help="Override the min_freq value in rp_input.json.",
+    )
+    parser.add_argument(
+        "--max-freq",
+        type=float,
+        default=None,
+        help="Override the max_freq value in rp_input.json.",
+    )
     parser.add_argument("--sampling-hz", type=int, default=250)
+    parser.add_argument(
+        "--display-amplitude",
+        type=float,
+        default=DEFAULT_DISPLAY_AMPLITUDE,
+        help=(
+            "Vertical multiplier after each trace is normalized to its "
+            "correlation-window peak."
+        ),
+    )
+    normalization_group = parser.add_mutually_exclusive_group()
+    normalization_group.add_argument(
+        "--normalize-to-largest-component",
+        dest="normalize_to_largest_component",
+        action="store_true",
+        help=(
+            "For each station, normalize all displayed components by the "
+            "largest correlation-window peak among them."
+        ),
+    )
+    normalization_group.add_argument(
+        "--normalize-separately",
+        dest="normalize_to_largest_component",
+        action="store_false",
+        help="Normalize each displayed component by its own correlation-window peak.",
+    )
+    parser.set_defaults(
+        normalize_to_largest_component=NORMALIZE_TO_LARGEST_COMPONENT
+    )
     parser.add_argument("--traces-per-frame", type=int, default=20)
     parser.add_argument("--snippets-root", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -596,6 +721,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_argument_parser().parse_args()
+    config_min_freq, config_max_freq = load_bandpass_config(RP_INPUT_FILE)
+    align_phase = load_align_phase_config(RP_INPUT_FILE)
+    min_freq = config_min_freq if args.min_freq is None else args.min_freq
+    max_freq = config_max_freq if args.max_freq is None else args.max_freq
     static_components = set(resolve_station_static_components(args))
     if not args.include_z:
         static_components.discard("Z")
@@ -615,13 +744,15 @@ def main() -> None:
     )
     if args.end_time <= args.start_time:
         raise ValueError("end-time must be greater than start-time")
-    if not args.start_time <= COMMON_S_PICK_TIME <= args.end_time:
+    if not args.start_time <= COMMON_PHASE_PICK_TIME <= args.end_time:
         raise ValueError(
-            "start-time and end-time must include the common predicted S pick "
-            f"at {COMMON_S_PICK_TIME:g} s"
+            "start-time and end-time must include the common predicted phase pick "
+            f"at {COMMON_PHASE_PICK_TIME:g} s"
         )
-    if args.min_freq <= 0.0 or args.max_freq <= args.min_freq:
+    if min_freq <= 0.0 or max_freq <= min_freq:
         raise ValueError("frequency range must satisfy 0 < min-freq < max-freq")
+    if args.display_amplitude <= 0.0:
+        raise ValueError("display-amplitude must be positive")
 
     win_pre, win_post, move_limit_sec = load_correlation_window_config(
         RP_INPUT_FILE
@@ -641,9 +772,9 @@ def main() -> None:
         PATH_PREFIX
         / "output"
         / (
-            f"{args.event}_{filename_component_label}_snippets_S_aligned_"
+            f"{args.event}_{filename_component_label}_snippets_{align_phase}_aligned_"
             f"{args.start_time:g}-{args.end_time:g}s_"
-            f"{args.min_freq:g}-{args.max_freq:g}Hz"
+            f"{min_freq:g}-{max_freq:g}Hz"
         )
     )
     origin, trace_pairs = collect_rt_traces(
@@ -653,37 +784,41 @@ def main() -> None:
         args.start_time,
         args.end_time,
         args.sampling_hz,
+        align_phase,
         args.include_z,
     )
     if not args.include_z:
         trace_pairs = [
-            (radial_trace, transverse_trace, None, s_arrival)
-            for radial_trace, transverse_trace, _vertical_trace, s_arrival
+            (radial_trace, transverse_trace, None, phase_arrival)
+            for radial_trace, transverse_trace, _vertical_trace, phase_arrival
             in trace_pairs
         ]
     radial = [pair[0] for pair in trace_pairs]
     transverse = [pair[1] for pair in trace_pairs]
     vertical = [pair[2] for pair in trace_pairs if pair[2] is not None]
     timing = TimingState()
-    preprocess_traces_bandpass(radial, args.min_freq, args.max_freq, timing)
-    preprocess_traces_bandpass(transverse, args.min_freq, args.max_freq, timing)
+    preprocess_traces_bandpass(radial, min_freq, max_freq, timing)
+    preprocess_traces_bandpass(transverse, min_freq, max_freq, timing)
     if vertical:
-        preprocess_traces_bandpass(vertical, args.min_freq, args.max_freq, timing)
+        preprocess_traces_bandpass(vertical, min_freq, max_freq, timing)
     output_files = plot_rt_frames(
         args.event,
         origin,
         trace_pairs,
         args.start_time,
         args.end_time,
-        args.min_freq,
-        args.max_freq,
+        min_freq,
+        max_freq,
         args.traces_per_frame,
         output_dir,
+        align_phase,
+        args.display_amplitude,
         win_pre,
         win_post,
         move_limit_sec,
         station_statics,
         static_components,
+        args.normalize_to_largest_component,
     )
     component_label = "Z/R/T" if args.include_z else "R/T"
     print(

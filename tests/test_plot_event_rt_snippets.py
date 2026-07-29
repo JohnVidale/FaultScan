@@ -25,16 +25,45 @@ class FakeTrace:
 
 
 class PlotEventRtSnippetsTests(unittest.TestCase):
-    def test_default_bandpass_is_one_to_four_hz(self):
-        self.assertEqual(rt_plot.MIN_FREQ, 1.0)
-        self.assertEqual(rt_plot.MAX_FREQ, 4.0)
+    def test_loads_bandpass_from_json(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config_file = Path(temporary) / "rp_input.json"
+            config_file.write_text(
+                json.dumps({"min_freq": 2.0, "max_freq": 8.0}),
+                encoding="utf-8",
+            )
+
+            values = rt_plot.load_bandpass_config(config_file)
+
+        self.assertEqual(values, (2.0, 8.0))
+
+    def test_loads_align_phase_from_json(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config_file = Path(temporary) / "rp_input.json"
+            config_file.write_text(
+                json.dumps({"align_phase": "P"}),
+                encoding="utf-8",
+            )
+
+            phase = rt_plot.load_align_phase_config(config_file)
+
+        self.assertEqual(phase, "P")
 
     def test_no_time_shift_option_disables_station_statics(self):
         parser = rt_plot.build_argument_parser()
+        default_components = frozenset(
+            component
+            for component, enabled in {
+                "R": rt_plot.APPLY_STATION_STATICS_R,
+                "T": rt_plot.APPLY_STATION_STATICS_T,
+                "Z": rt_plot.APPLY_STATION_STATICS_Z,
+            }.items()
+            if enabled
+        )
 
         self.assertEqual(
             rt_plot.resolve_station_static_components(parser.parse_args([])),
-            frozenset({"R", "T"}),
+            default_components,
         )
         self.assertEqual(
             rt_plot.resolve_station_static_components(
@@ -45,12 +74,21 @@ class PlotEventRtSnippetsTests(unittest.TestCase):
 
     def test_station_static_options_are_independent_by_component(self):
         parser = rt_plot.build_argument_parser()
+        default_components = frozenset(
+            component
+            for component, enabled in {
+                "R": rt_plot.APPLY_STATION_STATICS_R,
+                "T": rt_plot.APPLY_STATION_STATICS_T,
+                "Z": rt_plot.APPLY_STATION_STATICS_Z,
+            }.items()
+            if enabled
+        )
 
         self.assertEqual(
             rt_plot.resolve_station_static_components(
                 parser.parse_args(["--no-statics-t"])
             ),
-            frozenset({"R"}),
+            default_components - {"T"},
         )
         self.assertEqual(
             rt_plot.resolve_station_static_components(
@@ -67,6 +105,18 @@ class PlotEventRtSnippetsTests(unittest.TestCase):
             rt_plot.USE_Z_COMPONENT,
         )
         self.assertFalse(parser.parse_args(["--no-z"]).include_z)
+
+    def test_normalization_mode_uses_editable_default_and_cli_overrides(self):
+        parser = rt_plot.build_argument_parser()
+
+        self.assertEqual(
+            parser.parse_args([]).normalize_to_largest_component,
+            rt_plot.NORMALIZE_TO_LARGEST_COMPONENT,
+        )
+        self.assertFalse(
+            parser.parse_args(["--normalize-separately"])
+            .normalize_to_largest_component
+        )
 
     def test_loads_correlation_window_from_json(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -107,20 +157,20 @@ class PlotEventRtSnippetsTests(unittest.TestCase):
 
         self.assertEqual(statics, {"00001": 0.024, "00036": -0.031})
 
-    def test_trace_times_shift_predicted_s_to_zero(self):
+    def test_trace_times_shift_predicted_phase_to_zero(self):
         trace = FakeTrace("1", [1.0, 2.0, 1.0], [4.0, 5.0, 6.0])
 
-        shifted = rt_plot.trace_times_relative_to_predicted_s(
+        shifted = rt_plot.trace_times_relative_to_predicted_phase(
             trace,
             origin=object(),
-            s_arrival=5.0,
+            phase_arrival=5.0,
         )
 
         np.testing.assert_allclose(shifted, [-1.0, 0.0, 1.0])
-        statically_shifted = rt_plot.trace_times_relative_to_predicted_s(
+        statically_shifted = rt_plot.trace_times_relative_to_predicted_phase(
             trace,
             origin=object(),
-            s_arrival=5.0,
+            phase_arrival=5.0,
             station_static=0.12,
         )
         np.testing.assert_allclose(
@@ -128,7 +178,32 @@ class PlotEventRtSnippetsTests(unittest.TestCase):
             [-1.12, -0.12, 0.88],
         )
 
-    def test_plot_uses_s_relative_window_and_marks_common_pick(self):
+    def test_normalizes_each_trace_to_its_correlation_window_peak(self):
+        trace = FakeTrace("1", [3.0, -6.0, 12.0], [-1.0, 0.0, 1.0])
+
+        normalized = rt_plot.normalize_to_correlation_window_peak(
+            trace,
+            np.array([-1.0, 0.0, 1.0]),
+            win_pre=0.05,
+            win_post=0.15,
+        )
+
+        np.testing.assert_allclose(normalized, [0.5, -1.0, 2.0])
+
+    def test_can_normalize_trace_to_shared_largest_component_peak(self):
+        trace = FakeTrace("1", [3.0, -6.0, 12.0], [-1.0, 0.0, 1.0])
+
+        normalized = rt_plot.normalize_to_correlation_window_peak(
+            trace,
+            np.array([-1.0, 0.0, 1.0]),
+            win_pre=0.05,
+            win_post=0.15,
+            normalization_peak=12.0,
+        )
+
+        np.testing.assert_allclose(normalized, [0.25, -0.5, 1.0])
+
+    def test_plot_uses_phase_relative_window_and_marks_common_pick(self):
         radial = FakeTrace("1", [1.0, 2.0, 1.0], [4.0, 5.0, 6.0])
         transverse = FakeTrace("1", [-1.0, -2.0, -1.0], [4.0, 5.0, 6.0])
         vertical = FakeTrace("1", [0.5, 1.0, 0.5], [4.0, 5.0, 6.0])
@@ -147,6 +222,8 @@ class PlotEventRtSnippetsTests(unittest.TestCase):
                 max_freq=4.0,
                 traces_per_frame=20,
                 output_dir=Path(temporary),
+                align_phase="P",
+                display_amplitude=1.0,
                 win_pre=0.05,
                 win_post=0.15,
                 move_limit_sec=0.05,
@@ -183,12 +260,12 @@ class PlotEventRtSnippetsTests(unittest.TestCase):
             self.assertEqual(axis.get_xlim(), (-3.0, 7.0))
             self.assertEqual(
                 axis.get_xlabel(),
-                "Time relative to TauP-predicted S (s)",
+                "Time relative to TauP-predicted P (s)",
             )
             pick_segments = axis.collections[0].get_segments()
             self.assertTrue(
                 all(
-                    np.allclose(segment[:, 0], rt_plot.COMMON_S_PICK_TIME)
+                    np.allclose(segment[:, 0], rt_plot.COMMON_PHASE_PICK_TIME)
                     for segment in pick_segments
                 )
             )
@@ -220,6 +297,8 @@ class PlotEventRtSnippetsTests(unittest.TestCase):
                 max_freq=10.0,
                 traces_per_frame=20,
                 output_dir=Path(temporary),
+                align_phase="S",
+                display_amplitude=1.0,
                 win_pre=0.05,
                 win_post=0.15,
                 move_limit_sec=0.05,
@@ -254,6 +333,8 @@ class PlotEventRtSnippetsTests(unittest.TestCase):
                 max_freq=10.0,
                 traces_per_frame=20,
                 output_dir=Path(temporary),
+                align_phase="S",
+                display_amplitude=1.0,
                 win_pre=0.05,
                 win_post=0.15,
                 move_limit_sec=0.05,
@@ -299,6 +380,10 @@ class PlotEventRtSnippetsTests(unittest.TestCase):
             return_value=(0.05, 0.15, 0.05),
         ), patch.object(
             rt_plot,
+            "load_align_phase_config",
+            return_value="P",
+        ), patch.object(
+            rt_plot,
             "collect_rt_traces",
             return_value=(object(), trace_pairs),
         ), patch.object(
@@ -315,7 +400,12 @@ class PlotEventRtSnippetsTests(unittest.TestCase):
         plotted_pairs = plot_frames.call_args.args[2]
         self.assertEqual(len(plotted_pairs), 1)
         self.assertIsNone(plotted_pairs[0][2])
-        self.assertEqual(plot_frames.call_args.args[13], set())
+        self.assertEqual(plot_frames.call_args.args[9], "P")
+        self.assertEqual(
+            plot_frames.call_args.args[10],
+            rt_plot.DEFAULT_DISPLAY_AMPLITUDE,
+        )
+        self.assertEqual(plot_frames.call_args.args[15], set())
 
 
 if __name__ == "__main__":
