@@ -626,3 +626,44 @@ The shared waveform reader excludes these stations before reading, rotation, ali
 - The automation updated `Notes/daily/2026-07-27.md` and its local continuity
   memory only; it made no program, configuration, research-input, or output
   changes.
+
+## 2026-07-30 Chat Addendum: Project-Chat Consolidation
+
+### Confirmed July 28 Synchronization
+
+- A subsequent review grouped and pushed three commits: `d8252b6` (each
+  three-component diagnostic panel colors traces from that component's final
+  screening selection), `9c0b375` (configuration-aware plotting/stacking,
+  snippet-plotting updates, and obsolete reserve-configuration removal), and
+  `c3c20b0` (July project records). Full test discovery in `vidale_main`
+  passed 78 tests before that push.
+- This is code-level verification only. No scientific processing was run and
+  no new research output or interpretation was established by the commit
+  review.
+
+### Later Aligned-Stack Plot Decisions
+
+- The current uncommitted `align_stack.py` refinement limits the
+  cross-event-aligned component-stack plots and their alignment workbooks to
+  catalog `skip = 0` events *before* cross-correlation shifts are computed;
+  `skip = 1` and `skip = 2` events therefore cannot influence those products.
+  The non-aligned offset plot retains its separate selection behavior.
+- The aligned component-stack plots were made 7 by 12 inches, suppress the
+  y-axis event labels and former right-edge time-shift annotations, and place
+  each event ID above the left end of its trace. A focused smoke checkpoint
+  reported 32 passing tests for these local edits; this is not a replacement
+  for the earlier full-suite result.
+- At the latest observed configuration checkpoint, the working `rp_input.json`
+  is a local, uncommitted 250 Hz P-alignment case with a 10--25 Hz band, a 2--8
+  s interval, `r_window_min: -1`, pre-P threshold 3.0, catalog event-static
+  correction enabled, station-static mode `none`, selected-event subset, and
+  individual/overlay/record-section plotting disabled. This configuration is
+  implementation state, not evidence of a completed run or validated
+  station-static choice.
+
+### Remaining Work
+
+- No representative scientific comparison has yet established the effect of
+  the `skip = 0` restriction, display changes, or current P-alignment
+  configuration. FS-003 through FS-005 remain open under their existing
+  validation criteria.
