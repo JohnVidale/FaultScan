@@ -27,6 +27,107 @@ class AlignStackSmokeTests(unittest.TestCase):
 
         self.assertEqual(event_dir, Path(tmp) / "stack_output" / "E1")
 
+    def test_aligned_component_offset_plot_uses_only_skip_zero_events(self):
+        time = np.array([0.0, 0.1, 0.2])
+        mask = np.array([True, True, True])
+        stack = np.array([0.1, 1.0, 0.1])
+        metadata = {
+            "start_time": 0.0,
+            "win_start": 0,
+            "win_end": 2,
+            "sample_rate": 10.0,
+            "move_limit_sec": 0.05,
+            "npts": 3,
+            "t_ref": 0.1,
+        }
+        series = [
+            (event_id, time, mask, stack, metadata)
+            for event_id in ("E0", "E1", "E2")
+        ]
+        catalog = pd.DataFrame(
+            {"evid": ["E0", "E1", "E2"], "skip": [0, 1, 2]}
+        )
+        captured_event_ids = []
+
+        def fake_alignment(input_series, *_args, **_kwargs):
+            captured_event_ids.extend(item[0] for item in input_series)
+            return pd.DataFrame(
+                {
+                    "event_id": [item[0] for item in input_series],
+                    "shift_left_to_align_waveform_seconds": [0.0]
+                    * len(input_series),
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as temporary, patch.object(
+            self.mod, "catalog_local", catalog
+        ), patch.object(
+            self.mod, "compute_event_stack_alignment_shifts", side_effect=fake_alignment
+        ), patch.object(
+            self.mod, "event_time_shift_for_plot", return_value=0.0
+        ), patch.object(
+            self.mod, "catalog_time_shift_column", return_value="time shift"
+        ):
+            outputs = self.mod.plot_all_events_component_offsets_aligned(
+                component_stacks={"R": series},
+                run_output_dir=Path(temporary),
+                align_phase_name="S",
+                reference_event="E0",
+                max_shift_sec=0.2,
+            )
+
+        self.assertEqual(captured_event_ids, ["E0"])
+        self.assertEqual(len(outputs), 1)
+
+    def test_aligned_component_offset_plot_uses_all_events_without_catalog(self):
+        time = np.array([0.0, 0.1, 0.2])
+        mask = np.array([True, True, True])
+        stack = np.array([0.1, 1.0, 0.1])
+        metadata = {
+            "start_time": 0.0,
+            "win_start": 0,
+            "win_end": 2,
+            "sample_rate": 10.0,
+            "move_limit_sec": 0.05,
+            "npts": 3,
+            "t_ref": 0.1,
+        }
+        series = [
+            (event_id, time, mask, stack, metadata)
+            for event_id in ("E0", "E1")
+        ]
+        captured_event_ids = []
+
+        def fake_alignment(input_series, *_args, **_kwargs):
+            captured_event_ids.extend(item[0] for item in input_series)
+            return pd.DataFrame(
+                {
+                    "event_id": [item[0] for item in input_series],
+                    "shift_left_to_align_waveform_seconds": [0.0]
+                    * len(input_series),
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as temporary, patch.object(
+            self.mod, "catalog_local", None
+        ), patch.object(
+            self.mod, "compute_event_stack_alignment_shifts", side_effect=fake_alignment
+        ), patch.object(
+            self.mod, "event_time_shift_for_plot", return_value=0.0
+        ), patch.object(
+            self.mod, "catalog_time_shift_column", return_value="time shift"
+        ):
+            outputs = self.mod.plot_all_events_component_offsets_aligned(
+                component_stacks={"R": series},
+                run_output_dir=Path(temporary),
+                align_phase_name="S",
+                reference_event="E0",
+                max_shift_sec=0.2,
+            )
+
+        self.assertEqual(captured_event_ids, ["E0", "E1"])
+        self.assertEqual(len(outputs), 1)
+
     def test_start_plot_timing_returns_two_floats(self):
         wall, cpu = self.mod.start_plot_timing()
         self.assertIsInstance(wall, float)

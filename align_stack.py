@@ -49,7 +49,7 @@ from align_utils import (
 )
 
 min_freq, max_freq            = 3.0, 10.0 # Bandpass filter (Hz)
-start_time, end_time          = -2.0, 12 # Plotting time window (seconds since origin)
+start_time, end_time          = 2, 8 # Plotting time window (seconds since origin)
 # start_time, end_time          = -1990.0, 3690.0 # Plotting time window (seconds since origin)
 # start_time, end_time          = -1990.0, 15000 # Plotting time window (seconds since origin)
 win_pre, win_post             = 0.5,  0.5 # Correlation window parameters (seconds)
@@ -2183,7 +2183,9 @@ def plot_all_events_component_stacks(
     skipped_event_ids: set[str] = set()
     if catalog_local is not None and {"evid", "skip"}.issubset(catalog_local.columns):
         skip_values = pd.to_numeric(catalog_local["skip"], errors="coerce")
-        skipped_event_ids = set(catalog_local.loc[skip_values == 2, "evid"].astype(str))
+        skipped_event_ids = set(
+            catalog_local.loc[skip_values == 2, "evid"].astype(str)
+        )
 
     comp_keys = sorted(component_stacks.keys())
     fig_h = max(3.0, 3.2 * len(comp_keys))
@@ -2252,7 +2254,7 @@ def plot_all_events_component_offsets(
             continue
 
         fig_h = max(4.5, 0.35 * len(series) + 2.0)
-        fig, ax = plt.subplots(1, 1, figsize=(12, fig_h))
+        fig, ax = plt.subplots(1, 1, figsize=(8.4, fig_h))
         set_figure_title(fig, f"All events {comp_name} offset stacks")
 
         offsets = np.arange(len(series), dtype=float)
@@ -2421,18 +2423,26 @@ def plot_all_events_component_offsets_aligned(
         return []
 
     out_files: list[Path] = []
-    skipped_event_ids: set[str] = set()
+    included_event_ids: set[str] | None = None
     if catalog_local is not None and {"evid", "skip"}.issubset(catalog_local.columns):
         skip_values = pd.to_numeric(catalog_local["skip"], errors="coerce")
-        skipped_event_ids = set(catalog_local.loc[skip_values == 2, "evid"].astype(str))
+        included_event_ids = set(
+            catalog_local.loc[skip_values == 0, "evid"].astype(str)
+        )
 
     for comp_name in sorted(component_stacks.keys()):
         series = component_stacks[comp_name]
-        if not series:
+        plot_series = (
+            series
+            if included_event_ids is None
+            else [item for item in series if item[0] in included_event_ids]
+        )
+        if not plot_series:
+            print(f"[WARN] No skip=0 events available for aligned {comp_name} stack plot.")
             continue
         try:
             alignment_df = compute_event_stack_alignment_shifts(
-                series,
+                plot_series,
                 reference_event,
                 max_shift_sec,
                 measure_xcorr_residual=not use_event_static_correction,
@@ -2451,7 +2461,11 @@ def plot_all_events_component_offsets_aligned(
             event_time_shift_for_plot
         )
         alignment_df["catalog_time_shift_column"] = catalog_time_shift_column()
-        reference_meta = next(meta for eve_id, _, _, _, meta in series if eve_id == reference_event)
+        reference_meta = next(
+            meta
+            for eve_id, _, _, _, meta in plot_series
+            if eve_id == reference_event
+        )
         reference_t_ref = reference_meta.get("t_ref")
         (
             reference_win_start,
@@ -2467,26 +2481,27 @@ def plot_all_events_component_offsets_aligned(
             int(reference_meta["npts"]),
         )
 
-        plot_series = [item for item in series if item[0] not in skipped_event_ids]
-        if not plot_series:
-            print(f"[WARN] No non-skip=2 events available for aligned {comp_name} stack plot.")
-            continue
-
-        fig_h = max(4.5, 0.35 * len(plot_series) + 2.0)
-        fig, ax = plt.subplots(1, 1, figsize=(12, fig_h))
+        fig, ax = plt.subplots(1, 1, figsize=(7, 12))
         set_figure_title(fig, f"All events {comp_name} stacks aligned to {reference_event}")
         offsets = np.arange(len(plot_series), dtype=float)
 
         for i, (eve_id, t_abs, mask, stack_vec, meta) in enumerate(plot_series):
             plot_mask = mask if np.any(mask) else np.ones_like(t_abs, dtype=bool)
             shift_left = float(shifts[eve_id])
-            catalog_time_shift = event_time_shift_for_plot(eve_id)
             aligned_time = t_abs[plot_mask] - shift_left
             y = stack_vec[plot_mask]
             ymax = float(np.max(np.abs(y))) if y.size > 0 else 0.0
             if ymax > 0:
                 y = y / ymax
             ax.plot(aligned_time, y + offsets[i], lw=1.0, color="k")
+            ax.text(
+                float(aligned_time[0]),
+                offsets[i] + 0.42,
+                eve_id,
+                fontsize=7,
+                va="bottom",
+                ha="left",
+            )
 
             y0, y1 = offsets[i] - 0.42, offsets[i] + 0.42
             if reference_t_ref is not None:
@@ -2506,22 +2521,10 @@ def plot_all_events_component_offsets_aligned(
                 lw=1.2,
             )
 
-            ax.text(
-                float(aligned_time[-1]),
-                offsets[i],
-                f"  {eve_id} (time shift {catalog_time_shift:+.3f} s)",
-                fontsize=7,
-                va="center",
-                ha="left",
-            )
-
         ax.set_xlabel(f"Time aligned to {reference_event} (s)")
-        ax.set_ylabel("Event index (offset)")
-        ax.set_yticks(offsets)
-        if len(plot_series) <= 30:
-            ax.set_yticklabels([eve_id for eve_id, _, _, _, _ in plot_series], fontsize=7)
-        else:
-            ax.set_yticklabels([str(i + 1) for i in range(len(plot_series))], fontsize=7)
+        ax.set_ylabel("Event (offset)")
+        ax.set_yticks([])
+        ax.margins(y=0.08)
         ax.grid(alpha=0.2)
         ax.set_title(
             f"Component {comp_name}: stacks aligned to {reference_event} (N={len(plot_series)})",
