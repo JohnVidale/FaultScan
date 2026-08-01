@@ -667,3 +667,49 @@ The shared waveform reader excludes these stations before reading, rotation, ali
   the `skip = 0` restriction, display changes, or current P-alignment
   configuration. FS-003 through FS-005 remain open under their existing
   validation criteria.
+
+## 2026-07-31 Chat Addendum: Component-Specific Cross-Correlation Shifts
+
+### External Station-Workbook Update
+
+- On an explicit request, the external
+  `/Users/jvidale/Documents/Research/FaultScanR/event_sta_info/stations.xlsx`
+  workbook received a new column named
+  `shift_relative_to_predicted_seconds CI_40353864 T S 10-25Hz`. It contains
+  `shift_relative_to_predicted_seconds` values from
+  `CI_40353864_T_S_10-25Hz_shiftR_xcorr_statics.xlsx`.
+- The mapping matched 278 source station records to 278 station-workbook rows
+  exactly. The 20 station rows without a source record were intentionally left
+  blank. The existing shared `station static s` column was not overwritten.
+- The source workbook is a per-event, transverse-component, S-phase,
+  10--25 Hz cross-correlation result. It is a component-specific residual
+  measurement, not a replacement for the generic shared station correction or
+  a validated multi-event station-static table.
+
+### Alignment and Input Clarifications
+
+- In `station_static_mode: "cross_correlation"`, residual station lags are
+  estimated independently for Z, R, and T and written as per-event/component
+  workbooks under the external `stack_output/Statics` tree. In contrast, the
+  catalog `time shift` is an event-level origin-time correction shared by all
+  stations and components when enabled.
+- Direct header inspection for `CI_40353864` found 289 DP1, 289 DP2, and 289
+  DPZ MiniSEED files, all sampled at 250 Hz with no read errors. The 4 ms
+  sample interval bounds integer-sample alignment shifts unless sub-sample
+  shifting is introduced.
+- `plot_event_rt_snippets.py` reads the active phase, filtering, correlation,
+  and station-static settings from `rp_input.json`, but its displayed start
+  and end times remain its own constants or command-line options rather than
+  the JSON analysis-window values.
+
+### Interpretation and Follow-Up
+
+- The new T-column values are useful diagnostics for the selected event, but
+  they do not demonstrate that R and T have different physical station delays.
+  Differences can also arise from waveform complexity, anisotropy, conversion
+  or surface-wave energy, rotation/orientation error, or correlation locking
+  onto different features.
+- Do not substitute this one-event column for `station static s` or mark
+  FS-003 through FS-005 complete. A shared S-static model, if retained, still
+  requires representative multi-event, multi-component, and multi-band
+  validation with its provenance recorded.
