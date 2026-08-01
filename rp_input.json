@@ -2,27 +2,26 @@
   "min_freq":      10.0,
   "max_freq":      25.0,
 
-  "start_time":      2,
-  "end_time":        8,
+  "start_time":      4.5,
+  "end_time":        6.5,
 
   "win_pre":        0.05,
-  "win_post":       0.15,
+  "win_post":       0.05,
 
-  "r_window_min":   -1,
+  "r_window_min":   0.5,
   "move_limit_sec": 0.05,
-  "trace_peak_to_pre_p_median_min": 3.0,
+  "trace_peak_to_pre_p_median_min": 10.0,
 
   "analysis_hz": 250,
 
   "all_channels": true,
   "component": "T",
-  "align_phase": "P",
+  "align_phase": "S",
   "input_mode": "snippets",
 
   "event_alignment_reference": "CI_40353472",
   "event_stack_alignment_max_shift_sec": 0.2,
-  "use_event_static_correction": true,
-  "station_static_mode": "none",
+  "station_static_mode": "cross_correlation",
   "station_static_file": "/Users/jvidale/Documents/Research/FaultScanR/event_sta_info/stations.xlsx",
   "station_static_column": "station static s",
   "use_json_event_location": true,
@@ -60,7 +59,7 @@
     "CI_40353880"
   ],
 
-  "show_individual_seismograms": false,
-  "overlay_original_on_individual": false,
-  "show_record_section_plot": false
+  "show_individual_seismograms": true,
+  "overlay_original_on_individual": true,
+  "show_record_section_plot": true
 }

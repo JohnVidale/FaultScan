@@ -27,14 +27,14 @@ from align_utils import (
 PATH_PREFIX = Path("/Users/jvidale/Documents/Research/FaultScanR")
 RP_INPUT_FILE = Path(__file__).resolve().with_name("rp_input.json")
 DEFAULT_EVENT = "CI_40353864"
-START_TIME = -3.0  # Seconds relative to each station's TauP-predicted phase arrival.
-END_TIME = 7.0
+START_TIME = -1.0  # Seconds relative to each station's TauP-predicted phase arrival.
+END_TIME = 2.0
 APPLY_STATION_STATICS_R = False
 APPLY_STATION_STATICS_T = False
 APPLY_STATION_STATICS_Z = False
-USE_Z_COMPONENT = True
+USE_Z_COMPONENT = False
 COMMON_PHASE_PICK_TIME = 0.0
-DEFAULT_DISPLAY_AMPLITUDE = 0.3
+DEFAULT_DISPLAY_AMPLITUDE = 0.5
 NORMALIZE_TO_LARGEST_COMPONENT = True
 
 
