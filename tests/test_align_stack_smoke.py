@@ -604,7 +604,7 @@ class AlignStackSmokeTests(unittest.TestCase):
             pd.DataFrame(
                 {
                     "station": ["00001", "00002"],
-                    "station static s": [0.012, 0.035],
+                    "sta_statics_R": [0.012, 0.035],
                 }
             ).to_excel(station_file, index=False)
             reference = self.mod.Trace(data=np.ones(5))
@@ -614,14 +614,65 @@ class AlignStackSmokeTests(unittest.TestCase):
             stream = self.mod.Stream([reference, other])
 
             with patch.object(self.mod, "station_static_mode", "tabulated"), patch.object(
+                self.mod, "align_phase", "S"
+            ), patch.object(
                 self.mod, "station_static_file", station_file
-            ), patch.object(self.mod, "station_static_column", "station static s"), patch.object(
+            ), patch.object(self.mod, "station_static_column", "sta_statics_R"), patch.object(
                 self.mod, "_station_static_cache", None
             ):
                 shifts = self.mod.imposed_station_shifts_for_stream(stream, "00001")
 
         self.assertEqual(shifts["00001"], 0.0)
         self.assertAlmostEqual(shifts["00002"], 0.023)
+
+    def test_imposed_station_shifts_are_disabled_for_p_alignment(self):
+        reference = self.mod.Trace(data=np.ones(5))
+        reference.stats.station = "00001"
+        stream = self.mod.Stream([reference])
+
+        with patch.object(self.mod, "station_static_mode", "tabulated"), patch.object(
+            self.mod, "align_phase", "P"
+        ):
+            shifts = self.mod.imposed_station_shifts_for_stream(stream, "00001")
+
+        self.assertIsNone(shifts)
+
+    def test_cross_correlation_station_residuals_allow_p_alignment(self):
+        with patch.object(self.mod, "station_static_mode", "cross_correlation"), patch.object(
+            self.mod, "align_phase", "P"
+        ):
+            self.assertTrue(self.mod.measure_station_residuals_enabled())
+
+        with patch.object(self.mod, "station_static_mode", "none"), patch.object(
+            self.mod, "align_phase", "P"
+        ):
+            self.assertFalse(self.mod.measure_station_residuals_enabled())
+
+    def test_tabulated_mode_uses_configured_transverse_static_column(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            station_file = Path(tmp) / "stations.xlsx"
+            pd.DataFrame(
+                {
+                    "station": ["00001", "00002"],
+                    "sta_statics_R": [0.012, 0.035],
+                    "sta_statics_T": [0.021, 0.052],
+                }
+            ).to_excel(station_file, index=False)
+            reference = self.mod.Trace(data=np.ones(5))
+            reference.stats.station = "00001"
+            other = self.mod.Trace(data=np.ones(5))
+            other.stats.station = "00002"
+            stream = self.mod.Stream([reference, other])
+
+            with patch.object(self.mod, "station_static_mode", "tabulated"), patch.object(
+                self.mod, "align_phase", "S"
+            ), patch.object(self.mod, "station_static_file", station_file), patch.object(
+                self.mod, "station_static_column", "sta_statics_T"
+            ), patch.object(self.mod, "_station_static_cache", None):
+                shifts = self.mod.imposed_station_shifts_for_stream(stream, "00001")
+
+        self.assertEqual(shifts["00001"], 0.0)
+        self.assertAlmostEqual(shifts["00002"], 0.031)
 
     def test_resolve_station_static_mode_accepts_all_explicit_modes(self):
         for mode in ("none", "tabulated", "cross_correlation"):
@@ -633,6 +684,15 @@ class AlignStackSmokeTests(unittest.TestCase):
                     ),
                     mode,
                 )
+
+    def test_resolve_station_static_mode_maps_removed_tabulate_t_alias(self):
+        self.assertEqual(
+            self.mod.resolve_station_static_mode(
+                {"station_static_mode": "tabulate_T"},
+                "cross_correlation",
+            ),
+            "tabulated",
+        )
 
     def test_resolve_station_static_mode_rejects_invalid_mode(self):
         with self.assertRaisesRegex(ValueError, "station_static_mode"):

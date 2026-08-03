@@ -83,9 +83,10 @@ use_event_static_correction = False  # True: catalog shifts; False: measure even
 event_progress_say_rate = 130
 trace_peak_to_pre_p_median_min: float | None = 10.0
 STATION_STATIC_MODES = frozenset({"none", "tabulated", "cross_correlation"})
+TABULATED_STATION_STATIC_MODES = frozenset({"tabulated"})
 station_static_mode = "cross_correlation"
 station_static_file = info_root / "stations.xlsx"
-station_static_column = "station static s"
+station_static_column = "sta_statics_R"
 _station_static_cache: dict[str, float] | None = None
 
 # plotting options (user-facing)
@@ -97,10 +98,20 @@ RUN_OUTPUT_DIR: Path | None = None
 
 
 def resolve_station_static_mode(cfg: dict, default_mode: str) -> str:
-    """Return the configured station-static mode, accepting the legacy Boolean."""
+    """Return the configured station-static mode, accepting legacy settings."""
     if "station_static_mode" in cfg:
-        mode = str(cfg["station_static_mode"]).strip().lower()
-        if mode not in STATION_STATIC_MODES:
+        requested_mode = str(cfg["station_static_mode"]).strip()
+        if requested_mode.lower() == "tabulate_t":
+            return "tabulated"
+        mode = next(
+            (
+                candidate
+                for candidate in STATION_STATIC_MODES
+                if candidate.lower() == requested_mode.lower()
+            ),
+            None,
+        )
+        if mode is None:
             raise ValueError(
                 "station_static_mode must be one of "
                 f"{sorted(STATION_STATIC_MODES)}; got {cfg['station_static_mode']!r}"
@@ -113,6 +124,19 @@ def resolve_station_static_mode(cfg: dict, default_mode: str) -> str:
     if default_mode not in STATION_STATIC_MODES:
         raise ValueError(f"Invalid default station-static mode: {default_mode!r}")
     return default_mode
+
+
+def station_statics_are_enabled() -> bool:
+    """Stored station-static values are only applied for S-phase alignment."""
+    return (
+        align_phase.strip().upper() == "S"
+        and station_static_mode in TABULATED_STATION_STATIC_MODES
+    )
+
+
+def measure_station_residuals_enabled() -> bool:
+    """Cross-correlation may measure station residuals for either P or S."""
+    return station_static_mode == "cross_correlation"
 
 
 def apply_input_config(config_file: Path) -> None:
@@ -574,27 +598,32 @@ def imposed_station_shifts_for_stream(
 ) -> dict[str, float] | None:
     """Load station statics and express them relative to the selected reference station."""
     global _station_static_cache
-    if station_static_mode != "tabulated":
+    if (
+        not station_statics_are_enabled()
+        or station_static_mode not in TABULATED_STATION_STATIC_MODES
+    ):
         return None
+
+    static_column = station_static_column
 
     if _station_static_cache is None:
         if not station_static_file.exists():
             raise FileNotFoundError(f"Station static file not found: {station_static_file}")
         station_df = pd.read_excel(station_static_file, dtype={"station": str})
-        required = {"station", station_static_column}
+        required = {"station", static_column}
         missing = required - set(station_df.columns)
         if missing:
             raise ValueError(
                 f"{station_static_file} is missing required columns: {sorted(missing)}"
             )
-        station_df = station_df[["station", station_static_column]].copy()
+        station_df = station_df[["station", static_column]].copy()
         station_df["station"] = station_df["station"].astype(str).str.zfill(5)
-        station_df[station_static_column] = pd.to_numeric(
-            station_df[station_static_column], errors="coerce"
+        station_df[static_column] = pd.to_numeric(
+            station_df[static_column], errors="coerce"
         )
-        station_df = station_df.dropna(subset=[station_static_column])
+        station_df = station_df.dropna(subset=[static_column])
         _station_static_cache = dict(
-            zip(station_df["station"], station_df[station_static_column], strict=True)
+            zip(station_df["station"], station_df[static_column], strict=True)
         )
 
     station_ids = {str(trace.stats.station).zfill(5) for trace in st_comp}
@@ -613,7 +642,7 @@ def imposed_station_shifts_for_stream(
     }
     print(
         f"Using imposed station statics from {station_static_file.name} "
-        f"column {station_static_column!r}; reference {normalized_ref} is set to 0 s"
+        f"column {static_column!r}; reference {normalized_ref} is set to 0 s"
     )
     return imposed
 
@@ -2958,7 +2987,7 @@ def compute_alignment_products(
             for station_id, shift in p_shifts.items()
         }
     imposed_station_shifts = imposed_station_shifts_for_stream(st_comp, ref_station_id)
-    measure_station_residuals = station_static_mode == "cross_correlation"
+    measure_station_residuals = measure_station_residuals_enabled()
 
     # ===================== Stage 1: align to reference -> aligned_stack =====================
     aligned_stack = compute_stage1_aligned_stack(
@@ -3224,9 +3253,12 @@ def run_pipeline() -> None:
                     },
                 )
             )
-            if station_static_mode == "tabulated":
+            if (
+                station_static_mode in TABULATED_STATION_STATIC_MODES
+                and station_statics_are_enabled()
+            ):
                 print("Using imposed station statics; not writing newly measured station statics.")
-            elif station_static_mode == "cross_correlation":
+            elif measure_station_residuals_enabled():
                 write_component_phase_time_shifts(
                     save_dir=save_dir,
                     eve_id=eve_id,
@@ -3240,10 +3272,15 @@ def run_pipeline() -> None:
                     min_freq_hz=min_freq,
                     max_freq_hz=max_freq,
                 )
-            else:
+            elif station_static_mode == "none":
                 print(
                     "Station-static mode is 'none'; using TauP station shifts only "
                     "and not writing a measured-statics workbook."
+                )
+            else:
+                print(
+                    "Tabulated station statics are disabled unless align_phase is 'S'; "
+                    "using TauP station shifts only and not writing a station-statics workbook."
                 )
 
             _plot_wall_start, _plot_cpu_start = start_plot_timing()

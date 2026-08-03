@@ -146,13 +146,13 @@ class PlotEventRtSnippetsTests(unittest.TestCase):
             pd.DataFrame(
                 {
                     "station": [1, 36],
-                    "station static s": [0.024, -0.031],
+                    "sta_statics_R": [0.024, -0.031],
                 }
             ).to_excel(station_file, index=False)
 
             statics = rt_plot.load_station_statics(
                 station_file,
-                "station static s",
+                "sta_statics_R",
             )
 
         self.assertEqual(statics, {"00001": 0.024, "00036": -0.031})

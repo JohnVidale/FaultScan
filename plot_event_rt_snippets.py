@@ -167,7 +167,7 @@ def load_station_static_settings(config_file: Path) -> tuple[Path, str]:
     if not station_file.is_absolute():
         station_file = PATH_PREFIX / station_file
     station_column = str(
-        config.get("station_static_column", "station static s")
+        config.get("station_static_column", "sta_statics_R")
     )
     return station_file, station_column
 

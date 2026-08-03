@@ -21,9 +21,10 @@
 
   "event_alignment_reference": "CI_40353472",
   "event_stack_alignment_max_shift_sec": 0.2,
-  "station_static_mode": "cross_correlation",
+  "station_static_mode": "tabulated",
   "station_static_file": "/Users/jvidale/Documents/Research/FaultScanR/event_sta_info/stations.xlsx",
-  "station_static_column": "station static s",
+  "station_static_column": "sta_statics_T",
+  "use_event_static_correction": true,
   "use_json_event_location": true,
   "event_lat":   33.480,
   "event_lon": -116.513,
