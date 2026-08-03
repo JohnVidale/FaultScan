@@ -44,6 +44,7 @@ is a separate optional residual-alignment stage.
 | `plot_event_time_shifts.py` | Compares radial- and transverse-derived event shifts stored in the catalog. |
 | `plot_station_static_basis_comparison.py` | Compares R- and T-basis station-static estimates for each waveform component. |
 | `plot_station_component_static_comparison.py` | Compares Z, R, and T station statics within each correction basis. |
+| `plot_catalog_location_comparison.py` | Maps catalog and M event locations, linking matching event pairs. |
 | `tools/update_catalog_time_shifts.py` | Validates and applies measured event-stack residuals to a catalog workbook. |
 | `stacker.py` | Compares and plots per-event component stacks from one explicit `align_stack` run. |
 | `mapper.py` | Independent USGS seismicity download and mapping utility for the Pinyon Flat area. |
@@ -129,10 +130,14 @@ Event and station corrections are configured independently:
   stack residuals from the waveforms.
 - `station_static_mode: "none"` uses only the relative TauP-predicted station
   travel times and performs no station residual-lag search.
+- Stored/tabulated station statics are applied only when `align_phase: "S"`;
+  P alignment does not use workbook static values.
 - `station_static_mode: "tabulated"` adds the configured station-static
-  workbook column to the TauP shifts.
+  workbook column to the TauP shifts. Set `station_static_column` to either
+  `sta_statics_R` or `sta_statics_T` as appropriate.
 - `station_static_mode: "cross_correlation"` adds residual lags estimated from
-  the waveforms to the TauP shifts and writes station-residual workbooks.
+  the waveforms to the TauP shifts and writes station-residual workbooks for
+  either P or S alignment.
 
 For compatibility with older configuration files,
 `use_station_static_correction: true` maps to `tabulated` and `false` maps to
